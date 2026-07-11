@@ -150,9 +150,7 @@ HTS_SECTIONS = {
 def load_data():
     try:
         df_mex = pd.read_parquet(os.path.join("data", "comercio_mexico.parquet"))
-        df_ms = pd.read_parquet(os.path.join("data", "ms_total.parquet"))
-        df_xs = pd.read_parquet(os.path.join("data", "xs_total.parquet"))
-        df_tot = pd.concat([df_ms, df_xs], ignore_index=True)
+        df_tot = pd.read_parquet(os.path.join("data", "comercio_total.parquet"))
     except Exception as e:
         st.error(f"Error cargando los archivos Parquet: {e}")
         return pd.DataFrame(), pd.DataFrame()
