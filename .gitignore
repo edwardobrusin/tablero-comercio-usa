@@ -1,0 +1,12 @@
+# Ignorar bases de datos CSV generadas para jefatura (evitar sobrecarga de memoria/peso en GitHub)
+*.csv
+data/*.csv
+
+# Ignorar archivos del sistema operativo (opcional pero muy recomendado)
+.DS_Store
+__pycache__/
+
+# Ignorar las carpetas locales de PDFs si tampoco quieres subirlas a GitHub
+comercio_sec_I/
+comercio_sec_II/
+*.zip

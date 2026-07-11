@@ -146,7 +146,7 @@ HTS_SECTIONS = {
 # ==========================================
 # 3. CARGA DE DATOS Y SIMULACIÓN
 # ==========================================
-@st.cache_data
+@st.cache_resource
 def load_data():
     try:
         # Los archivos ya vienen limpios, tipados y optimizados desde el entorno local
@@ -289,20 +289,20 @@ else:
 # ==========================================
 capitulos_validos = HTS_SECTIONS[seccion_sel]
 
-df_mex_st = df_mex[(df_mex['STATE'] == selected_state_code) & (df_mex['Chapter'].isin(capitulos_validos))].copy()
-df_tot_st = df_tot[(df_tot['STATE'] == selected_state_code) & (df_tot['Chapter'].isin(capitulos_validos))].copy()
+# Al quitar los .copy(), creamos "vistas" virtuales que no consumen nueva RAM
+df_mex_st = df_mex[(df_mex['STATE'] == selected_state_code) & (df_mex['Chapter'].isin(capitulos_validos))]
+df_tot_st = df_tot[(df_tot['STATE'] == selected_state_code) & (df_tot['Chapter'].isin(capitulos_validos))]
 
 # Encontrar el año máximo y los meses disponibles en ese año
-# Convertimos el año máximo explícitamente a entero (int)
 max_year = int(df_tot['year'].max())
 
-# Filtramos asegurándonos de que la comparación use la versión numérica de la columna
-meses_max_year = df_tot[df_tot['year'].astype(int) == max_year]['month'].unique()
+# El año ya viene como int desde el parquet optimizado, quitamos .astype(int) que colapsaba la RAM
+meses_max_year = df_tot[df_tot['year'] == max_year]['month'].unique()
 meses_list = sorted(list(meses_max_year))
 
-# Agregamos .astype(int) a la columna 'year' al momento de hacer el .isin()
-df_mex_ytd = df_mex_st[(df_mex_st['year'].astype(int).isin([max_year, max_year - 1])) & (df_mex_st['month'].isin(meses_max_year))]
-df_tot_ytd = df_tot_st[(df_tot_st['year'].astype(int).isin([max_year, max_year - 1])) & (df_tot_st['month'].isin(meses_max_year))]
+# Filtramos directamente (sin astype)
+df_mex_ytd = df_mex_st[(df_mex_st['year'].isin([max_year, max_year - 1])) & (df_mex_st['month'].isin(meses_max_year))]
+df_tot_ytd = df_tot_st[(df_tot_st['year'].isin([max_year, max_year - 1])) & (df_tot_st['month'].isin(meses_max_year))]
 
 # Etiqueta dinámica de periodo
 MONTH_MAP = {"01":"Ene", "02":"Feb", "03":"Mar", "04":"Abr", "05":"May", "06":"Jun", 
