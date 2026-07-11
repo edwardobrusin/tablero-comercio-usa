@@ -149,27 +149,13 @@ HTS_SECTIONS = {
 @st.cache_data
 def load_data():
     try:
+        # Los archivos ya vienen limpios, tipados y optimizados desde el entorno local
         df_mex = pd.read_parquet(os.path.join("data", "comercio_mexico.parquet"))
         df_tot = pd.read_parquet(os.path.join("data", "comercio_total.parquet"))
+        return df_mex, df_tot
     except Exception as e:
         st.error(f"Error cargando los archivos Parquet: {e}")
         return pd.DataFrame(), pd.DataFrame()
-
-    # Limpieza de tipos de dato para México
-    df_mex['VALOR'] = pd.to_numeric(df_mex['VALOR'].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce').fillna(0)
-    df_mex['year'] = pd.to_numeric(df_mex['year'], errors='coerce').fillna(0).astype(int)
-    df_mex['month'] = df_mex['month'].astype(str).str.zfill(2)
-
-    # Limpieza de tipos de dato para Totales
-    df_tot['VALOR'] = pd.to_numeric(df_tot['VALOR'].astype(str).str.replace(',', '').str.replace(' ', ''), errors='coerce').fillna(0)
-    df_tot['year'] = pd.to_numeric(df_tot['year'], errors='coerce').fillna(0).astype(int)
-    df_tot['month'] = df_tot['month'].astype(str).str.zfill(2)
-
-    # Extraer el capítulo (primeros 2 dígitos del commodity)
-    df_mex['Chapter'] = df_mex['COMMODITY'].astype(str).str.zfill(6).str[:2]
-    df_tot['Chapter'] = df_tot['COMMODITY'].astype(str).str.zfill(6).str[:2]
-
-    return df_mex, df_tot
 
 df_mex, df_tot = load_data()
 if df_mex.empty: st.stop()
