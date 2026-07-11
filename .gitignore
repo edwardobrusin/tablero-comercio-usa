@@ -1,12 +1,21 @@
-# Ignorar bases de datos CSV generadas para jefatura (evitar sobrecarga de memoria/peso en GitHub)
+# Ignorar bases de datos originales pesadas (Materia Prima)
+data/comercio_mexico.parquet
+data/ms_total.parquet
+data/xs_total.parquet
+data/comercio_total.parquet
+
+# Ignorar archivos CSV
 *.csv
 data/*.csv
 
-# Ignorar archivos del sistema operativo (opcional pero muy recomendado)
+# Ignorar archivos temporales
 .DS_Store
 __pycache__/
 
-# Ignorar las carpetas locales de PDFs si tampoco quieres subirlas a GitHub
+# Ignorar las carpetas locales de PDFs (para no subir decenas de archivos sueltos)
 comercio_sec_I/
 comercio_sec_II/
+
+# Ignorar zips en general, PERO permitir el zip oficial del dashboard
 *.zip
+!fichas_comercio_us.zip

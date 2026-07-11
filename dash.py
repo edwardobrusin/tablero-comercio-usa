@@ -150,15 +150,13 @@ HTS_SECTIONS = {
 @st.cache_resource
 def load_data():
     try:
-        df_mex = pd.read_parquet(os.path.join("data", "comercio_mexico.parquet"))
-        df_tot = pd.read_parquet(os.path.join("data", "comercio_total.parquet"))
+        # Cargamos las bases que ya vienen extirpadas y ultra-comprimidas (int16, category)
+        df_mex = pd.read_parquet(os.path.join("data", "comercio_mexico_opt.parquet"))
+        df_tot = pd.read_parquet(os.path.join("data", "comercio_total_opt.parquet"))
+        df_dict = pd.read_parquet(os.path.join("data", "diccionario_desc.parquet"))
         
-        # Aislar las descripciones de texto en un diccionario para que no ocupen RAM en las agrupaciones
-        dict_desc = pd.Series(df_mex['DESC'].values, index=df_mex['COMMODITY']).to_dict()
-        
-        # ELIMINAMOS la columna de texto de los dataframes maestros (Ahorro garantizado de ~150MB+ de RAM)
-        if 'DESC' in df_mex.columns: df_mex = df_mex.drop(columns=['DESC'])
-        if 'DESC' in df_tot.columns: df_tot = df_tot.drop(columns=['DESC'])
+        # Convertimos la tabla del diccionario a un diccionario nativo de Python (rapidísimo en memoria)
+        dict_desc = dict(zip(df_dict['COMMODITY'], df_dict['DESC']))
         
         return df_mex, df_tot, dict_desc
     except Exception as e:
