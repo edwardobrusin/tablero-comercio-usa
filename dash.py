@@ -5,6 +5,7 @@ import os
 import textwrap
 import base64
 import zipfile
+import gc
 
 # ==========================================
 # 1. CONFIGURACIÓN DE LA PÁGINA
@@ -149,15 +150,22 @@ HTS_SECTIONS = {
 @st.cache_resource
 def load_data():
     try:
-        # Los archivos ya vienen limpios, tipados y optimizados desde el entorno local
         df_mex = pd.read_parquet(os.path.join("data", "comercio_mexico.parquet"))
         df_tot = pd.read_parquet(os.path.join("data", "comercio_total.parquet"))
-        return df_mex, df_tot
+        
+        # Aislar las descripciones de texto en un diccionario para que no ocupen RAM en las agrupaciones
+        dict_desc = pd.Series(df_mex['DESC'].values, index=df_mex['COMMODITY']).to_dict()
+        
+        # ELIMINAMOS la columna de texto de los dataframes maestros (Ahorro garantizado de ~150MB+ de RAM)
+        if 'DESC' in df_mex.columns: df_mex = df_mex.drop(columns=['DESC'])
+        if 'DESC' in df_tot.columns: df_tot = df_tot.drop(columns=['DESC'])
+        
+        return df_mex, df_tot, dict_desc
     except Exception as e:
         st.error(f"Error cargando los archivos Parquet: {e}")
-        return pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), {}
 
-df_mex, df_tot = load_data()
+df_mex, df_tot, dict_desc = load_data()
 if df_mex.empty: st.stop()
 
 # ==========================================
@@ -289,20 +297,27 @@ else:
 # ==========================================
 capitulos_validos = HTS_SECTIONS[seccion_sel]
 
-# Al quitar los .copy(), creamos "vistas" virtuales que no consumen nueva RAM
-df_mex_st = df_mex[(df_mex['STATE'] == selected_state_code) & (df_mex['Chapter'].isin(capitulos_validos))]
-df_tot_st = df_tot[(df_tot['STATE'] == selected_state_code) & (df_tot['Chapter'].isin(capitulos_validos))]
-
-# Encontrar el año máximo y los meses disponibles en ese año
+# Calculamos el tiempo base globalmente
 max_year = int(df_tot['year'].max())
-
-# El año ya viene como int desde el parquet optimizado, quitamos .astype(int) que colapsaba la RAM
 meses_max_year = df_tot[df_tot['year'] == max_year]['month'].unique()
 meses_list = sorted(list(meses_max_year))
 
-# Filtramos directamente (sin astype)
-df_mex_ytd = df_mex_st[(df_mex_st['year'].isin([max_year, max_year - 1])) & (df_mex_st['month'].isin(meses_max_year))]
-df_tot_ytd = df_tot_st[(df_tot_st['year'].isin([max_year, max_year - 1])) & (df_tot_st['month'].isin(meses_max_year))]
+# Máscaras de 1 solo paso: Combinamos los filtros para NUNCA instanciar dataframes intermedios y ahorrar RAM
+mask_mex_ytd = (
+    (df_mex['STATE'] == selected_state_code) & 
+    (df_mex['Chapter'].isin(capitulos_validos)) & 
+    (df_mex['year'].isin([max_year, max_year - 1])) & 
+    (df_mex['month'].isin(meses_max_year))
+)
+df_mex_ytd = df_mex[mask_mex_ytd]
+
+mask_tot_ytd = (
+    (df_tot['STATE'] == selected_state_code) & 
+    (df_tot['Chapter'].isin(capitulos_validos)) & 
+    (df_tot['year'].isin([max_year, max_year - 1])) & 
+    (df_tot['month'].isin(meses_max_year))
+)
+df_tot_ytd = df_tot[mask_tot_ytd]
 
 # Etiqueta dinámica de periodo
 MONTH_MAP = {"01":"Ene", "02":"Feb", "03":"Mar", "04":"Abr", "05":"May", "06":"Jun", 
@@ -322,9 +337,12 @@ else:
 # ==========================================
 
 def get_full_year_total_bar(flow_type, color_mex):
-    # Calculamos el total de todo el año anterior (sin importar los meses YTD)
-    tot_prev_year = df_tot_st[(df_tot_st['flow'] == flow_type) & (df_tot_st['year'] == max_year - 1)]['VALOR'].sum()
-    mex_prev_year = df_mex_st[(df_mex_st['flow'] == flow_type) & (df_mex_st['year'] == max_year - 1)]['VALOR'].sum()
+    # Calculamos el total de todo el año anterior directamente desde la base limpia para evitar variables
+    mask_tot_prev = (df_tot['STATE'] == selected_state_code) & (df_tot['Chapter'].isin(capitulos_validos)) & (df_tot['flow'] == flow_type) & (df_tot['year'] == max_year - 1)
+    tot_prev_year = df_tot[mask_tot_prev]['VALOR'].sum()
+    
+    mask_mex_prev = (df_mex['STATE'] == selected_state_code) & (df_mex['Chapter'].isin(capitulos_validos)) & (df_mex['flow'] == flow_type) & (df_mex['year'] == max_year - 1)
+    mex_prev_year = df_mex[mask_mex_prev]['VALOR'].sum()
 
     pct_mex = (mex_prev_year / tot_prev_year * 100) if tot_prev_year > 0 else 0
 
@@ -346,15 +364,19 @@ ${tot_prev_year:,.0f} <span style="font-size: 0.8rem; color: #64748B; font-weigh
 def get_top_10_total_split(flow_type, color_mex, color_rest):
     """Genera la estructura de la Gráfica 1 y 3 (Top Totales con División México)"""
     
-    tot_agg = df_tot_ytd[df_tot_ytd['flow'] == flow_type].groupby(['COMMODITY', 'DESC', 'year'])['VALOR'].sum().reset_index()
-    mex_agg = df_mex_ytd[df_mex_ytd['flow'] == flow_type].groupby(['COMMODITY', 'year'])['VALOR'].sum().reset_index()
+    df_t_flow = df_tot_ytd[df_tot_ytd['flow'] == flow_type]
+    df_m_flow = df_mex_ytd[df_mex_ytd['flow'] == flow_type]
+    
+    # Groupby rápido de enteros (Sin arrastrar columnas de texto gigante)
+    tot_agg = df_t_flow.groupby(['COMMODITY', 'year'])['VALOR'].sum().reset_index()
+    mex_agg = df_m_flow.groupby(['COMMODITY', 'year'])['VALOR'].sum().reset_index()
     
     # Totales para las barras maestras integradas en la tarjeta
-    val_total_curr = df_tot_ytd[(df_tot_ytd['flow'] == flow_type) & (df_tot_ytd['year'] == max_year)]['VALOR'].sum()
-    val_total_prev = df_tot_ytd[(df_tot_ytd['flow'] == flow_type) & (df_tot_ytd['year'] == max_year - 1)]['VALOR'].sum()
+    val_total_curr = df_t_flow[df_t_flow['year'] == max_year]['VALOR'].sum()
+    val_total_prev = df_t_flow[df_t_flow['year'] == max_year - 1]['VALOR'].sum()
     
-    val_mex_curr = df_mex_ytd[(df_mex_ytd['flow'] == flow_type) & (df_mex_ytd['year'] == max_year)]['VALOR'].sum()
-    val_mex_prev = df_mex_ytd[(df_mex_ytd['flow'] == flow_type) & (df_mex_ytd['year'] == max_year - 1)]['VALOR'].sum()
+    val_mex_curr = df_m_flow[df_m_flow['year'] == max_year]['VALOR'].sum()
+    val_mex_prev = df_m_flow[df_m_flow['year'] == max_year - 1]['VALOR'].sum()
 
     max_total_scale = max(val_total_curr, val_total_prev)
     pct_total_prev_scale = max((val_total_prev / max_total_scale) * 85 if max_total_scale > 0 else 0, 0.5)
@@ -382,6 +404,9 @@ def get_top_10_total_split(flow_type, color_mex, color_rest):
     
     top10['Part_Mex_Prev'] = (top10['Mex_Prev'] / top10['Tot_Prev']) * 100
     top10['Part_Mex_Prev'] = top10['Part_Mex_Prev'].fillna(0)
+    
+    # Restauramos la descripción solo para el Top 10 ganador
+    top10['DESC'] = top10['COMMODITY'].map(dict_desc).fillna("Desc. no disponible")
     
     max_scale = max(top10['Tot_Curr'].max(), top10['Tot_Prev'].max())
     
@@ -470,11 +495,14 @@ ${val_total_curr:,.0f} <span style="font-size: 0.75rem; color: #64748B; font-wei
 def get_top_10_mexico_base(flow_type, color_mex):
     """Genera la estructura de la Gráfica 2 y 4 (Top Base México)"""
     
-    mex_agg = df_mex_ytd[df_mex_ytd['flow'] == flow_type].groupby(['COMMODITY', 'DESC', 'year'])['VALOR'].sum().reset_index()
+    df_m_flow = df_mex_ytd[df_mex_ytd['flow'] == flow_type]
+    
+    # Groupby rápido de enteros
+    mex_agg = df_m_flow.groupby(['COMMODITY', 'year'])['VALOR'].sum().reset_index()
     
     # Totales para las barras maestras integradas en la tarjeta (Solo Base México)
-    val_mex_curr = df_mex_ytd[(df_mex_ytd['flow'] == flow_type) & (df_mex_ytd['year'] == max_year)]['VALOR'].sum()
-    val_mex_prev = df_mex_ytd[(df_mex_ytd['flow'] == flow_type) & (df_mex_ytd['year'] == max_year - 1)]['VALOR'].sum()
+    val_mex_curr = df_m_flow[df_m_flow['year'] == max_year]['VALOR'].sum()
+    val_mex_prev = df_m_flow[df_m_flow['year'] == max_year - 1]['VALOR'].sum()
 
     max_total_scale = max(val_mex_curr, val_mex_prev)
     pct_total_prev_scale = max((val_mex_prev / max_total_scale) * 85 if max_total_scale > 0 else 0, 0.5)
@@ -494,6 +522,9 @@ def get_top_10_mexico_base(flow_type, color_mex):
     
     total_mex_flow_prev = df_chart['Mex_Prev'].sum()
     top10['Part_Interna_Prev'] = (top10['Mex_Prev'] / total_mex_flow_prev) * 100 if total_mex_flow_prev > 0 else 0
+    
+    # Restauramos la descripción solo para el Top 10 ganador
+    top10['DESC'] = top10['COMMODITY'].map(dict_desc).fillna("Desc. no disponible")
     
     max_scale = max(top10['Mex_Curr'].max(), top10['Mex_Prev'].max())
     
@@ -604,3 +635,6 @@ st.markdown(get_top_10_total_split('exports', color_mex="#008889", color_rest="#
 
 st.markdown(f"<h4 style='color:#0F172A; margin-top:30px;'>4. Top 10 Subpartidas Destinadas a México</h4>", unsafe_allow_html=True)
 st.markdown(get_top_10_mexico_base('exports', color_mex="#008889"), unsafe_allow_html=True)
+
+# Limpieza final de memoria (Recolección de basura) para entornos limitados (ej. 1GB en Streamlit Cloud)
+gc.collect()
