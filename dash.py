@@ -166,15 +166,15 @@ def load_data():
 df_mex, df_tot, dict_desc = load_data()
 if df_mex.empty: st.stop()
 
-# ==========================================
-# 4. LOGOS INSTITUCIONALES & SIDEBAR
-# ==========================================
-col_logo1, col_logo2 = st.sidebar.columns(2)
-try:
-    with col_logo1: st.image("logos/logo-01.png", use_container_width=True)
-    with col_logo2: st.image("logos/logo-02.png", use_container_width=True)
-except: pass
-st.sidebar.markdown("<hr style='margin-top: 5px; margin-bottom: 15px;'>", unsafe_allow_html=True)
+# # ==========================================
+# # 4. LOGOS INSTITUCIONALES & SIDEBAR
+# # ==========================================
+# col_logo1, col_logo2 = st.sidebar.columns(2)
+# try:
+#     with col_logo1: st.image("logos/logo-01.png", use_container_width=True)
+#     with col_logo2: st.image("logos/logo-02.png", use_container_width=True)
+# except: pass
+# st.sidebar.markdown("<hr style='margin-top: 5px; margin-bottom: 15px;'>", unsafe_allow_html=True)
 
 # Selector de Sección HTS
 st.sidebar.markdown("<h3 style='font-size: 1.1rem; color:#0F172A; margin-bottom: 5px;'>1. Sección Arancelaria</h3>", unsafe_allow_html=True)
@@ -392,7 +392,9 @@ def get_top_10_total_split(flow_type, color_mex, color_rest):
     df_chart = tot_curr.merge(tot_prev[['COMMODITY', 'Tot_Prev']], on='COMMODITY', how='left')
     df_chart = df_chart.merge(mex_curr[['COMMODITY', 'Mex_Curr']], on='COMMODITY', how='left')
     df_chart = df_chart.merge(mex_prev[['COMMODITY', 'Mex_Prev']], on='COMMODITY', how='left')
-    df_chart.fillna(0, inplace=True)
+    # Aplicamos el fillna exclusivamente a las columnas de valores numéricos
+    cols_numericas = ['Tot_Prev', 'Mex_Curr', 'Mex_Prev']
+    df_chart[cols_numericas] = df_chart[cols_numericas].fillna(0)
     
     top10 = df_chart.sort_values('Tot_Curr', ascending=False).head(10).copy()
     if top10.empty: return "<div style='padding:20px; color:#64748B;'>No hay datos para esta selección.</div>"
@@ -438,8 +440,8 @@ ${val_total_curr:,.0f} <span style="font-size: 0.75rem; color: #64748B; font-wei
 </div>
 
 <div style="display: flex; width: 100%; margin-bottom: 20px; font-weight: 800; font-size: 0.85rem; text-transform:uppercase; color: #64748B; border-bottom:2px solid #F1F5F9; padding-bottom:10px; justify-content: space-between; gap: 15px;">
-<div style="flex: 0 0 18%; text-align: left; padding-left: 5px;">Subpartida (HTS 6)</div>
-<div style="flex: 1; text-align: left; padding-left: 15px;">Valor Histórico (Dólares) - <span style="color:{color_mex};">■ México</span> <span style="color:{color_rest};">■ Resto del Mundo</span></div>
+<div style="flex: 0 0 20%; text-align: left; padding-left: 5px;">Subpartida (HTS 6)</div>
+<div style="flex: 1; text-align: left; padding-left: 15px;">Valor (Dólares) - <span style="color:{color_mex};">■ México</span> <span style="color:{color_rest};">■ Resto del Mundo</span></div>
 <div style="flex: 0 0 10%; text-align: center;">Part. MX<br>{max_year - 1}</div>
 <div style="flex: 0 0 10%; text-align: center;">Part. MX<br>{label_curr}</div>
 </div>"""
@@ -454,11 +456,12 @@ ${val_total_curr:,.0f} <span style="font-size: 0.75rem; color: #64748B; font-wei
         pct_mex_prev = (r['Mex_Prev'] / r['Tot_Prev']) * 100 if r['Tot_Prev'] > 0 else 0
         pct_rest_prev = 100 - pct_mex_prev
 
-        desc_wrapped = '<br>'.join(textwrap.wrap(f"{r['COMMODITY']} - {r['DESC']}", width=65))
+        # Cadena intacta para HTML
+        desc_wrapped = f"{r['COMMODITY']} - {r['DESC']}"
         
         html += f"""<div style="display: flex; width: 100%; align-items: stretch; margin-bottom: 18px; justify-content: space-between; gap: 15px;">
-<div style="flex: 0 0 18%; text-align: left; padding-left: 5px; font-size: 0.85rem; display: flex; align-items: center; justify-content: flex-start;">
-<span style="display: inline-block; line-height: 1.3; color: #0F172A; font-weight: 600;">{desc_wrapped}</span>
+<div style="flex: 0 0 20%; padding-left: 5px; font-size: 0.85rem; display: flex; align-items: center;">
+<span style="display: inline-block; width: 100%; text-align: justify; text-justify: inter-word; hyphens: auto; line-height: 1.3; color: #0F172A; font-weight: 600;">{desc_wrapped}</span>
 </div>
 <div style="flex: 1; border-left: 2px solid #E2E8F0; padding-left: 15px; display: flex; flex-direction: column; justify-content: center; gap: 8px;">
 <div style="display:flex; align-items:center; width: 100%;">
@@ -466,7 +469,7 @@ ${val_total_curr:,.0f} <span style="font-size: 0.75rem; color: #64748B; font-wei
 <div style="background-color: {color_mex}; width: {pct_mex_prev}%;"></div>
 <div style="background-color: {color_rest}; width: {pct_rest_prev}%;"></div>
 </div>
-<span style="margin-left: 10px; font-weight: 600; font-size: 0.75rem; color: #64748B;">${r['Tot_Prev']:,.0f} <span style="font-size:0.6rem;">({label_prev})</span></span>
+<span style="margin-left: 10px; font-weight: 600; font-size: 0.75rem; color: #64748B;">${r['Tot_Prev']:,.0f}</span>
 </div>
 <div style="display:flex; align-items:center; width: 100%;">
 <div style="width: {pct_tot_curr_scale}%; height: 20px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: flex; overflow: hidden;">
@@ -510,7 +513,8 @@ def get_top_10_mexico_base(flow_type, color_mex):
     mex_prev = mex_agg[mex_agg['year'] == max_year - 1].rename(columns={'VALOR': 'Mex_Prev'})
     
     df_chart = mex_curr.merge(mex_prev[['COMMODITY', 'Mex_Prev']], on='COMMODITY', how='left')
-    df_chart.fillna(0, inplace=True)
+    # Llenamos con 0 SOLO la columna numérica para evitar romper el dtype categórico de COMMODITY
+    df_chart['Mex_Prev'] = df_chart['Mex_Prev'].fillna(0)
     
     top10 = df_chart.sort_values('Mex_Curr', ascending=False).head(10).copy()
     if top10.empty: return "<div style='padding:20px; color:#64748B;'>No hay datos para esta selección.</div>"
@@ -550,8 +554,8 @@ ${val_mex_curr:,.0f}
 </div>
 
 <div style="display: flex; width: 100%; margin-bottom: 20px; font-weight: 800; font-size: 0.85rem; text-transform:uppercase; color: #64748B; border-bottom:2px solid #F1F5F9; padding-bottom:10px; justify-content: space-between; gap: 15px;">
-<div style="flex: 0 0 18%; text-align: left; padding-left: 5px;">Subpartida (HTS 6)</div>
-<div style="flex: 1; text-align: left; padding-left: 15px;">Valor desde México (Dólares)</div>
+<div style="flex: 0 0 20%; text-align: left; padding-left: 5px;">Subpartida (HTS 6)</div>
+<div style="flex: 1; text-align: left; padding-left: 15px;">Valor (Dólares)</div>
 <div style="flex: 0 0 10%; text-align: center;">Part. MX<br>{max_year - 1}</div>
 <div style="flex: 0 0 10%; text-align: center;">Part. MX<br>{label_curr}</div>
 </div>"""
@@ -560,16 +564,17 @@ ${val_mex_curr:,.0f}
         pct_curr_scale = max((r['Mex_Curr'] / max_scale) * 85 if max_scale > 0 else 0, 0.5)
         pct_prev_scale = max((r['Mex_Prev'] / max_scale) * 85 if max_scale > 0 else 0, 0.5)
         
-        desc_wrapped = '<br>'.join(textwrap.wrap(f"{r['COMMODITY']} - {r['DESC']}", width=65))
+        # Eliminamos textwrap y dejamos la cadena intacta
+        desc_wrapped = f"{r['COMMODITY']} - {r['DESC']}"
         
         html += f"""<div style="display: flex; width: 100%; align-items: stretch; margin-bottom: 18px; justify-content: space-between; gap: 15px;">
-<div style="flex: 0 0 18%; text-align: left; padding-left: 5px; font-size: 0.85rem; display: flex; align-items: center; justify-content: flex-start;">
-<span style="display: inline-block; line-height: 1.3; color: #0F172A; font-weight: 600;">{desc_wrapped}</span>
+<div style="flex: 0 0 20%; padding-left: 5px; font-size: 0.85rem; display: flex; align-items: center;">
+<span style="display: inline-block; width: 100%; text-align: justify; text-justify: inter-word; hyphens: auto; line-height: 1.3; color: #0F172A; font-weight: 600;">{desc_wrapped}</span>
 </div>
 <div style="flex: 1; border-left: 2px solid #E2E8F0; padding-left: 15px; display: flex; flex-direction: column; justify-content: center; gap: 8px;">
 <div style="display:flex; align-items:center; width: 100%;">
 <div style="background-color: {color_mex}; width: {pct_prev_scale}%; height: 12px; border-radius: 4px; opacity: 0.6;"></div>
-<span style="margin-left: 10px; font-weight: 600; font-size: 0.75rem; color: #64748B;">${r['Mex_Prev']:,.0f} <span style="font-size:0.6rem;">({label_prev})</span></span>
+<span style="margin-left: 10px; font-weight: 600; font-size: 0.75rem; color: #64748B;">${r['Mex_Prev']:,.0f}</span>
 </div>
 <div style="display:flex; align-items:center; width: 100%;">
 <div style="background-color: {color_mex}; width: {pct_curr_scale}%; height: 20px; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);"></div>
@@ -597,7 +602,7 @@ reps = US_FIGURES.get(selected_state_code, "Representantes No Disponibles")
 trade_reps = US_TRADE_REPS.get(selected_state_code, None)
 
 st.markdown(f"<h1 style='color: #2596be; font-size: 2.8rem;'>Análisis Comercial: {selected_state_name}</h1>", unsafe_allow_html=True)
-st.markdown(f"<p style='color: #64748B; margin-top:-15px; margin-bottom:10px; font-weight:600;'>Filtro Activo: {seccion_sel} | Comparativa YTD: {label_curr} vs {label_prev}</p>", unsafe_allow_html=True)
+st.markdown(f"<p style='color: #64748B; margin-top:-15px; margin-bottom:10px; font-weight:600;'>{seccion_sel} | Unidad de Medida: Dólares Estadounidenses</p>", unsafe_allow_html=True)
 
 html_reps = f"<div style='background-color: #E2E8F0; padding: 10px 15px; border-radius: 8px; margin-bottom: 30px; display: inline-block;'><span style='color: #475569; font-size: 0.9rem;'><b>Representación en el Senado:</b> {reps}</span>"
 if trade_reps:
@@ -614,7 +619,7 @@ st.header("Importaciones del Estado")
 
 st.markdown(get_full_year_total_bar('imports', color_mex="#2596be"), unsafe_allow_html=True)
 
-st.markdown(f"<h4 style='color:#0F172A; margin-top:15px;'>1. Top 10 Subpartidas Importadas (Global) y Participación de México</h4>", unsafe_allow_html=True)
+st.markdown(f"<h4 style='color:#0F172A; margin-top:15px;'>1. Top 10 Subpartidas Importadas por {selected_state_name} y Participación de México</h4>", unsafe_allow_html=True)
 st.markdown(get_top_10_total_split('imports', color_mex="#2596be", color_rest="#CBD5E1"), unsafe_allow_html=True)
 
 st.markdown(f"<h4 style='color:#0F172A; margin-top:30px;'>2. Top 10 Subpartidas Provenientes de México</h4>", unsafe_allow_html=True)
@@ -628,7 +633,7 @@ st.header("Exportaciones del Estado")
 
 st.markdown(get_full_year_total_bar('exports', color_mex="#008889"), unsafe_allow_html=True)
 
-st.markdown(f"<h4 style='color:#0F172A; margin-top:15px;'>3. Top 10 Subpartidas Exportadas (Global) y Participación a México</h4>", unsafe_allow_html=True)
+st.markdown(f"<h4 style='color:#0F172A; margin-top:15px;'>3. Top 10 Subpartidas Exportadas por {selected_state_name} y Participación a México</h4>", unsafe_allow_html=True)
 st.markdown(get_top_10_total_split('exports', color_mex="#008889", color_rest="#CBD5E1"), unsafe_allow_html=True)
 
 st.markdown(f"<h4 style='color:#0F172A; margin-top:30px;'>4. Top 10 Subpartidas Destinadas a México</h4>", unsafe_allow_html=True)
