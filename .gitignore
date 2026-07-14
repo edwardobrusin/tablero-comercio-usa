@@ -1,8 +1,6 @@
 # Ignorar bases de datos originales pesadas (Materia Prima)
-data/comercio_mexico.parquet
 data/ms_total.parquet
 data/xs_total.parquet
-data/comercio_total.parquet
 
 # Ignorar archivos CSV
 *.csv
