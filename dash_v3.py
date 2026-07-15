@@ -311,7 +311,11 @@ if selected_state_code == 'US':
     # ------------------------------------------
     # FILTROS NACIONALES (Se actualizan instantáneamente sin botón de confirmación)
     # ------------------------------------------
-    col_f0, col_f1, col_f2, col_f3 = st.columns([1, 1, 1.2, 1.8])
+    col_fs, col_f0, col_f1, col_f2, col_f3 = st.columns([1, 1, 1, 1.2, 1.8])
+    with col_fs:
+        socio_sel_map = st.selectbox("Socio Comercial", ["Mundo", "México"], key="nac_socio_map")
+        ruta_map_main = RUTA_TOT if socio_sel_map == "Mundo" else RUTA_MEX
+        ruta_map_ref = RUTA_MEX if socio_sel_map == "Mundo" else RUTA_TOT
     with col_f0:
         flujo_sel = st.selectbox("Flujo Comercial", ["Comercio Total", "Importaciones", "Exportaciones"], key="nac_flujo")
         if flujo_sel == "Comercio Total":
@@ -371,27 +375,34 @@ if selected_state_code == 'US':
     # ------------------------------------------
     anio_previo = anio_sel - 1
     
-    q_map_tot_curr = f"SELECT STATE, SUM(VALOR) as Total_Trade FROM '{RUTA_TOT}' WHERE {caps_cond} AND {flow_cond} AND year = {anio_sel} AND {meses_cond} AND {subp_cond} GROUP BY STATE"
-    q_map_tot_prev = f"SELECT STATE, SUM(VALOR) as Total_Trade_Prev FROM '{RUTA_TOT}' WHERE {caps_cond} AND {flow_cond} AND year = {anio_previo} AND {meses_cond} AND {subp_cond} GROUP BY STATE"
-    q_map_mex_curr = f"SELECT STATE, SUM(VALOR) as Mex_Trade FROM '{RUTA_MEX}' WHERE {caps_cond} AND {flow_cond} AND year = {anio_sel} AND {meses_cond} AND {subp_cond} GROUP BY STATE"
+    q_map_main_curr = f"SELECT STATE, SUM(VALOR) as Main_Trade FROM '{ruta_map_main}' WHERE {caps_cond} AND {flow_cond} AND year = {anio_sel} AND {meses_cond} AND {subp_cond} GROUP BY STATE"
+    q_map_main_prev = f"SELECT STATE, SUM(VALOR) as Main_Trade_Prev FROM '{ruta_map_main}' WHERE {caps_cond} AND {flow_cond} AND year = {anio_previo} AND {meses_cond} AND {subp_cond} GROUP BY STATE"
+    q_map_ref_curr = f"SELECT STATE, SUM(VALOR) as Ref_Trade FROM '{ruta_map_ref}' WHERE {caps_cond} AND {flow_cond} AND year = {anio_sel} AND {meses_cond} AND {subp_cond} GROUP BY STATE"
     
-    df_map_curr = duckdb.query(q_map_tot_curr).to_df()
+    df_map_curr = duckdb.query(q_map_main_curr).to_df()
     
     if not df_map_curr.empty:
-        df_map_prev = duckdb.query(q_map_tot_prev).to_df()
-        df_map_mex = duckdb.query(q_map_mex_curr).to_df()
+        df_map_prev = duckdb.query(q_map_main_prev).to_df()
+        df_map_ref = duckdb.query(q_map_ref_curr).to_df()
         
         df_map = df_map_curr.merge(df_map_prev, on='STATE', how='left').fillna(0)
-        df_map = df_map.merge(df_map_mex, on='STATE', how='left').fillna(0)
+        df_map = df_map.merge(df_map_ref, on='STATE', how='left').fillna(0)
         
-        # Cálculos de Participación y Variación
-        df_map['Part_Mex'] = (df_map['Mex_Trade'] / df_map['Total_Trade']) * 100
-        df_map['Part_Mex'] = df_map['Part_Mex'].replace([np.inf, -np.inf], 0).fillna(0)
+        # Cálculos dinámicos según el socio seleccionado
+        if socio_sel_map == "Mundo":
+            df_map['Participacion'] = (df_map['Ref_Trade'] / df_map['Main_Trade']) * 100
+            hover_part_label_map = "Participación MX"
+        else:
+            df_map['Participacion'] = (df_map['Main_Trade'] / df_map['Ref_Trade']) * 100
+            hover_part_label_map = "Participación MX"
+            
+        df_map['Participacion'] = df_map['Participacion'].replace([np.inf, -np.inf], 0).fillna(0)
         
-        df_map['Var_Anual'] = ((df_map['Total_Trade'] / df_map['Total_Trade_Prev']) - 1) * 100
-        df_map['Var_Anual'] = df_map['Var_Anual'].replace([np.inf, -np.inf], np.nan) # Para no mostrar +inf cuando prev es 0
+        df_map['Var_Anual'] = ((df_map['Main_Trade'] / df_map['Main_Trade_Prev']) - 1) * 100
+        df_map['Var_Anual'] = df_map['Var_Anual'].replace([np.inf, -np.inf], np.nan)
     else:
         df_map = df_map_curr
+        hover_part_label_map = "Participación"
     
     st.markdown("<hr style='border-color: #2596be; border-width: 2px; margin-top:10px; margin-bottom:20px;'>", unsafe_allow_html=True)
     st.markdown("### Mapa de Comercio por Estado")
@@ -399,17 +410,13 @@ if selected_state_code == 'US':
         st.markdown("<p style='color: #64748B; font-size: 0.95rem; font-style: italic; margin-top: -10px; margin-bottom: 20px;'>Seleccione cualquier estado para ver el top 3 de subpartidas de importación y exportación. Doble clic para regresar a la vista general.</p>", unsafe_allow_html=True)
     
     if not df_map.empty:
-        # 1. Filtramos estrictamente solo los 50 estados, eliminando 'US' (Nacional)
         valid_states = [k for k in US_STATES.keys() if k != 'US']
         df_map = df_map[df_map['STATE'].isin(valid_states)].copy()
         
-        # 2. Aseguramos que los 50 estados existan obligatoriamente en el DataFrame. 
-        #    Esto evitará que Plotly deforme el mapa o dependa de un 'showland' global.
         all_states_df = pd.DataFrame({'STATE': valid_states})
         df_map = all_states_df.merge(df_map, on='STATE', how='left')
         
-        # 3. Llenamos los nulos con 0 para poder operar cálculos correctamente
-        for col in ['Total_Trade', 'Mex_Trade', 'Part_Mex']:
+        for col in ['Main_Trade', 'Ref_Trade', 'Participacion']:
             if col in df_map.columns:
                 df_map[col] = df_map[col].fillna(0)
         
@@ -418,17 +425,14 @@ if selected_state_code == 'US':
             
         df_map = df_map.reset_index(drop=True)
         
-        # 4. Dividimos los datos en válidos y nulos. Los nulos se mapearán como un fondo secundario.
-        #    Esto evita usar znullcolor (inválido en Choropleth) o showland (que crea spillover geográfico).
         import plotly.graph_objects as go
         
-        df_valid = df_map[df_map['Total_Trade'] > 0].copy()
-        df_missing = df_map[df_map['Total_Trade'] == 0].copy()
+        df_valid = df_map[df_map['Main_Trade'] > 0].copy()
+        df_missing = df_map[df_map['Main_Trade'] == 0].copy()
         
-        # 5. Calculamos el rango de colores solo con los datos válidos
         if not df_valid.empty:
-            zmin_val = float(df_valid['Total_Trade'].min())
-            zmax_val = float(df_valid['Total_Trade'].max())
+            zmin_val = float(df_valid['Main_Trade'].min())
+            zmax_val = float(df_valid['Main_Trade'].max())
         else:
             zmin_val, zmax_val = 0, 1
             
@@ -436,21 +440,24 @@ if selected_state_code == 'US':
         df_valid['Estado'] = df_valid['STATE'].map(US_STATES)
         df_missing['Estado'] = df_missing['STATE'].map(US_STATES)
         
-        # 6. Formateo de los hover para el grupo con datos (Evita cálculos innecesarios en 0s)
-        df_valid['Hover_Tot'] = df_valid['Total_Trade'].apply(lambda x: f"${x:,.0f} USD")
-        df_valid['Hover_Mex'] = df_valid.apply(lambda r: f"${r['Mex_Trade']:,.0f} USD ({r['Part_Mex']:.1f}%)", axis=1)
+        df_valid['Hover_Tot'] = df_valid['Main_Trade'].apply(lambda x: f"${x:,.0f} USD")
+        if socio_sel_map == "Mundo":
+            df_valid['Hover_Part'] = df_valid.apply(lambda r: f"${r['Ref_Trade']:,.0f} USD ({r['Participacion']:.1f}%)", axis=1)
+        else:
+            df_valid['Hover_Part'] = df_valid.apply(lambda r: f"{r['Participacion']:.1f}%", axis=1)
+            
         df_valid['Hover_Var'] = df_valid.apply(lambda r: f"{r['Var_Anual']:+.1f}%" if pd.notnull(r['Var_Anual']) else "N/A (Sin base)", axis=1)
         
         fig = px.choropleth(
             df_valid, 
             locations='STATE', 
             locationmode="USA-states", 
-            color='Total_Trade',
+            color='Main_Trade',
             scope="usa",
             color_continuous_scale="Teal",
             range_color=[zmin_val, zmax_val],
             hover_name='Estado',
-            custom_data=['STATE', 'Hover_Mex', 'Hover_Var', 'Hover_Tot']
+            custom_data=['STATE', 'Hover_Part', 'Hover_Var', 'Hover_Tot']
         )
         
         etiqueta_flujo = "Comercio Total" if flujo_sel == "Comercio Total" else ("Importaciones" if flujo_sel == "Importaciones" else "Exportaciones")
@@ -459,7 +466,7 @@ if selected_state_code == 'US':
             hovertemplate=(
                 "<b>%{hovertext}</b><br><br>"
                 f"<span style='color:#7dd3c8; font-weight:700;'>{etiqueta_flujo}:</span> %{{customdata[3]}}<br>"
-                "<span style='color:#7dd3c8; font-weight:700;'>Participación MX:</span> %{customdata[1]}<br>"
+                f"<span style='color:#7dd3c8; font-weight:700;'>{hover_part_label_map}:</span> %{{customdata[1]}}<br>"
                 "<span style='color:#7dd3c8; font-weight:700;'>Variación Anual:</span> %{customdata[2]}"
                 "<extra></extra>"
             ),
@@ -468,23 +475,22 @@ if selected_state_code == 'US':
             hoverlabel=dict(bgcolor='#0F172A', font_size=13, font_family='sans-serif', font_color='#F8FAFC', bordercolor='#0F172A', align='left')
         )
         
-        # Agregamos manualmente la capa de estados sin operaciones (Relleno Gris Exacto).
         if not df_missing.empty:
             df_missing['Hover_Tot'] = "Sin operaciones registradas"
-            df_missing['Hover_Mex'] = "N/A"
+            df_missing['Hover_Part'] = "N/A"
             df_missing['Hover_Var'] = "N/A"
             
             fig.add_trace(go.Choropleth(
                 locations=df_missing['STATE'],
                 z=[0] * len(df_missing),
                 locationmode="USA-states",
-                colorscale=[[0, '#E2E8F0'], [1, '#E2E8F0']],  # Color gris sólido
+                colorscale=[[0, '#E2E8F0'], [1, '#E2E8F0']], 
                 showscale=False,
-                customdata=np.stack((df_missing['STATE'], df_missing['Hover_Mex'], df_missing['Hover_Var'], df_missing['Hover_Tot']), axis=-1),
+                customdata=np.stack((df_missing['STATE'], df_missing['Hover_Part'], df_missing['Hover_Var'], df_missing['Hover_Tot']), axis=-1),
                 hovertemplate=(
                     "<b>%{hovertext}</b><br><br>"
                     f"<span style='color:#7dd3c8; font-weight:700;'>{etiqueta_flujo}:</span> %{{customdata[3]}}<br>"
-                    "<span style='color:#7dd3c8; font-weight:700;'>Participación MX:</span> %{customdata[1]}<br>"
+                    f"<span style='color:#7dd3c8; font-weight:700;'>{hover_part_label_map}:</span> %{{customdata[1]}}<br>"
                     "<span style='color:#7dd3c8; font-weight:700;'>Variación Anual:</span> %{customdata[2]}"
                     "<extra></extra>"
                 ),
@@ -494,13 +500,7 @@ if selected_state_code == 'US':
                 hoverlabel=dict(bgcolor='#0F172A', font_size=13, font_family='sans-serif', font_color='#F8FAFC', bordercolor='#0F172A', align='left')
             ))
         
-        # 7. Apagamos el 'showland' global. Ahora el mapa se construye únicamente por 
-        #    el rompecabezas de los 50 polígonos estatales, eliminando contornos fantasmas.
-        fig.update_geos(
-            visible=False, 
-            showland=False, 
-            bgcolor='#F8FAFC'
-        )
+        fig.update_geos(visible=False, showland=False, bgcolor='#F8FAFC')
         
         fig.update_layout(
             margin={"r":0,"t":0,"l":0,"b":0,"pad":0}, 
@@ -512,8 +512,7 @@ if selected_state_code == 'US':
             coloraxis_colorbar=dict(title="", thickness=10, len=0.9, y=0.5, yanchor="middle", outlinewidth=0, tickfont=dict(color='#64748B'))
         )
         
-        # Actualizamos la key del mapa para forzar la recarga al cambiar el flujo
-        map_key = f"mapa_nacional_us__{seccion_sel}__{flujo_sel}__{anio_sel}__{periodo_sel}__{meses_cond}__{subp_sel_code}"
+        map_key = f"mapa_nacional_us__{seccion_sel}__{socio_sel_map}__{flujo_sel}__{anio_sel}__{periodo_sel}__{meses_cond}__{subp_sel_code}"
         
         # Desactivamos la capacidad de selección y el recálculo si no estamos en TOTAL
         accion_clic = "rerun" if subp_sel_code == "TOTAL" else "ignore"
@@ -563,8 +562,11 @@ if selected_state_code == 'US':
             nombre_estado_click = US_STATES.get(clicked_state, clicked_state)
             st.markdown(f"<h3 style='margin-top: 30px; color: #0F172A; text-align: center;'>Top 3 Subpartidas: {nombre_estado_click}</h3>", unsafe_allow_html=True)
             
+            is_mundo = (socio_sel_map == "Mundo")
+            label_part_tbl = "Part. MX" if is_mundo else "Part. Interna"
+            
             # Generador de Tablas HTML estilizadas
-            def generar_tabla_html(df, color_tema, total_col, mex_col):
+            def generar_tabla_html(df, color_tema):
                 if df.empty:
                     return "<div style='padding:15px; color:#64748B; font-style:italic;'>No hay operaciones para esta selección.</div>"
                 html = f"""
@@ -574,23 +576,28 @@ if selected_state_code == 'US':
                             <tr style="background-color: #F8FAFC; border-bottom: 2px solid #E2E8F0; color: #475569; font-size: 0.85rem; text-transform: uppercase;">
                                 <th style="padding: 12px 15px; font-weight: 700; width: 55%;">Subpartida</th>
                                 <th style="padding: 12px 15px; font-weight: 700; text-align: right; width: 25%;">Total (USD)</th>
-                                <th style="padding: 12px 15px; font-weight: 700; text-align: center; width: 20%;">Part. MX</th>
+                                <th style="padding: 12px 15px; font-weight: 700; text-align: center; width: 20%;">{label_part_tbl}</th>
                             </tr>
                         </thead>
                         <tbody>
                 """
                 for _, row in df.iterrows():
                     subp = str(row['COM_DESC'])
-                    tot_val = row[total_col]
-                    mex_val = row[mex_col]
-                    part_mx = (mex_val / tot_val * 100) if tot_val > 0 else 0
+                    val_main = row['Val_Main']
+                    val_ref = row['Val_Ref']
+                    
+                    if is_mundo:
+                        part_val = (val_ref / val_main * 100) if val_main > 0 else 0
+                    else:
+                        part_val = (val_main / val_ref * 100) if val_ref > 0 else 0
+                        
                     html += f"""
                         <tr style="border-bottom: 1px solid #F1F5F9; transition: background-color 0.2s;">
                             <td style="padding: 12px 15px; color: #0F172A; font-size: 0.85rem; font-weight: 600;">{subp}</td>
-                            <td style="padding: 12px 15px; color: #0F172A; font-size: 0.9rem; font-weight: 800; text-align: right;">${tot_val:,.0f}</td>
+                            <td style="padding: 12px 15px; color: #0F172A; font-size: 0.9rem; font-weight: 800; text-align: right;">${val_main:,.0f}</td>
                             <td style="padding: 12px 15px; text-align: center;">
                                 <span style="background-color: #F1F5F9; color: {color_tema}; padding: 4px 8px; border-radius: 6px; font-weight: 800; font-size: 0.85rem; border: 1px solid #E2E8F0;">
-                                    {part_mx:.1f}%
+                                    {part_val:.1f}%
                                 </span>
                             </td>
                         </tr>
@@ -598,57 +605,59 @@ if selected_state_code == 'US':
                 html += "</tbody></table></div>"
                 return html.replace('\n', '')
 
+            def get_query_top3(flujo):
+                if is_mundo:
+                    return f"""
+                        WITH top_main AS (
+                            SELECT COMMODITY, MAX(COM_DESC) as COM_DESC, SUM(VALOR) as Val_Main 
+                            FROM '{RUTA_TOT}' 
+                            WHERE STATE='{clicked_state}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
+                            GROUP BY COMMODITY 
+                            ORDER BY Val_Main DESC 
+                            LIMIT 3
+                        ),
+                        ref_data AS (
+                            SELECT COMMODITY, SUM(VALOR) as Val_Ref 
+                            FROM '{RUTA_MEX}' 
+                            WHERE STATE='{clicked_state}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
+                              AND COMMODITY IN (SELECT COMMODITY FROM top_main)
+                            GROUP BY COMMODITY
+                        )
+                        SELECT t.COMMODITY, t.COM_DESC, t.Val_Main, COALESCE(r.Val_Ref, 0) AS Val_Ref
+                        FROM top_main t LEFT JOIN ref_data r ON t.COMMODITY = r.COMMODITY
+                        ORDER BY t.Val_Main DESC
+                    """
+                else:
+                    return f"""
+                        WITH top_main AS (
+                            SELECT COMMODITY, MAX(COM_DESC) as COM_DESC, SUM(VALOR) as Val_Main 
+                            FROM '{RUTA_MEX}' 
+                            WHERE STATE='{clicked_state}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
+                            GROUP BY COMMODITY 
+                            ORDER BY Val_Main DESC 
+                            LIMIT 3
+                        ),
+                        total_ref AS (
+                            SELECT SUM(VALOR) as Total_Ref
+                            FROM '{RUTA_MEX}'
+                            WHERE STATE='{clicked_state}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond}
+                        )
+                        SELECT t.COMMODITY, t.COM_DESC, t.Val_Main, (SELECT Total_Ref FROM total_ref) AS Val_Ref
+                        FROM top_main t
+                        ORDER BY t.Val_Main DESC
+                    """
+
             col_imp, col_exp = st.columns(2)
             
             with col_imp:
                 st.markdown("<h4 style='color: #2596be;'>Importaciones (El Estado Importa)</h4>", unsafe_allow_html=True)
-                q_top_imp = f"""
-                    WITH top_tot AS (
-                        SELECT COMMODITY, MAX(COM_DESC) as COM_DESC, SUM(VALOR) as Tot_Imp 
-                        FROM '{RUTA_TOT}' 
-                        WHERE STATE='{clicked_state}' AND flow='imports' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
-                        GROUP BY COMMODITY 
-                        ORDER BY Tot_Imp DESC 
-                        LIMIT 3
-                    ),
-                    mex_data AS (
-                        SELECT COMMODITY, SUM(VALOR) as Mex_Imp 
-                        FROM '{RUTA_MEX}' 
-                        WHERE STATE='{clicked_state}' AND flow='imports' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
-                          AND COMMODITY IN (SELECT COMMODITY FROM top_tot)
-                        GROUP BY COMMODITY
-                    )
-                    SELECT t.COMMODITY, t.COM_DESC, t.Tot_Imp, COALESCE(m.Mex_Imp, 0) AS Mex_Imp
-                    FROM top_tot t LEFT JOIN mex_data m ON t.COMMODITY = m.COMMODITY
-                    ORDER BY t.Tot_Imp DESC
-                """
-                df_ti = duckdb.query(q_top_imp).to_df()
-                st.markdown(generar_tabla_html(df_ti, "#2596be", "Tot_Imp", "Mex_Imp"), unsafe_allow_html=True)
+                df_ti = duckdb.query(get_query_top3('imports')).to_df()
+                st.markdown(generar_tabla_html(df_ti, "#2596be"), unsafe_allow_html=True)
 
             with col_exp:
                 st.markdown("<h4 style='color: #008889;'>Exportaciones (El Estado Exporta)</h4>", unsafe_allow_html=True)
-                q_top_exp = f"""
-                    WITH top_tot AS (
-                        SELECT COMMODITY, MAX(COM_DESC) as COM_DESC, SUM(VALOR) as Tot_Exp 
-                        FROM '{RUTA_TOT}' 
-                        WHERE STATE='{clicked_state}' AND flow='exports' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
-                        GROUP BY COMMODITY 
-                        ORDER BY Tot_Exp DESC 
-                        LIMIT 3
-                    ),
-                    mex_data AS (
-                        SELECT COMMODITY, SUM(VALOR) as Mex_Exp 
-                        FROM '{RUTA_MEX}' 
-                        WHERE STATE='{clicked_state}' AND flow='exports' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
-                          AND COMMODITY IN (SELECT COMMODITY FROM top_tot)
-                        GROUP BY COMMODITY
-                    )
-                    SELECT t.COMMODITY, t.COM_DESC, t.Tot_Exp, COALESCE(m.Mex_Exp, 0) AS Mex_Exp
-                    FROM top_tot t LEFT JOIN mex_data m ON t.COMMODITY = m.COMMODITY
-                    ORDER BY t.Tot_Exp DESC
-                """
-                df_te = duckdb.query(q_top_exp).to_df()
-                st.markdown(generar_tabla_html(df_te, "#008889", "Tot_Exp", "Mex_Exp"), unsafe_allow_html=True)
+                df_te = duckdb.query(get_query_top3('exports')).to_df()
+                st.markdown(generar_tabla_html(df_te, "#008889"), unsafe_allow_html=True)
                 
         # ==========================================
         # EVOLUCIÓN HISTÓRICA NACIONAL (NUEVA GRÁFICA)
