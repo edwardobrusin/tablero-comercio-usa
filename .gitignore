@@ -13,6 +13,8 @@ __pycache__/
 # Ignorar las carpetas locales de PDFs (para no subir decenas de archivos sueltos)
 comercio_sec_I/
 comercio_sec_II/
+data/raw/
+
 
 # Ignorar zips en general, PERO permitir el zip oficial del dashboard
 *.zip
