@@ -953,7 +953,31 @@ if selected_state_code == 'US':
                 
                 st.plotly_chart(fig_line_n, use_container_width=True)
                 
-                csv_n = df_line_n.to_csv(index=False).encode('utf-8')
+                # Preparar DataFrame amigable para la exportación
+                df_export_n = df_line_n.copy()
+                
+                # Definir nombres descriptivos según el socio comercial
+                if socio_sel_n == "Mundo":
+                    col_valor_n = "Valor Total con el Mundo (USD)"
+                    col_ref_n = "Valor Total con México (USD)"
+                else:
+                    col_valor_n = "Valor de la Subpartida con México (USD)"
+                    col_ref_n = "Valor Total de la Sección con México (USD)"
+                
+                df_export_n = df_export_n.rename(columns={
+                    "periodo": "Periodo",
+                    "COM_DESC": "Subpartida",
+                    "VALOR": col_valor_n,
+                    "REF_VALOR": col_ref_n,
+                    "top3_states": "Top 3 Estados",
+                    "Participacion": "Participación (%)"
+                })
+                
+                # Reordenar las columnas para una lectura más natural
+                orden_cols_n = ["Periodo", "Subpartida", col_valor_n, col_ref_n, "Participación (%)", "Top 3 Estados"]
+                df_export_n = df_export_n[orden_cols_n]
+                
+                csv_n = df_export_n.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Descargar datos de la gráfica",
                     data=csv_n,
@@ -1505,7 +1529,30 @@ else:
             
             st.plotly_chart(fig_line, use_container_width=True)
             
-            csv_est = df_line.to_csv(index=False).encode('utf-8')
+            # Preparar DataFrame amigable para la exportación
+            df_export_est = df_line.copy()
+            
+            # Definir nombres descriptivos según el socio comercial
+            if socio_sel == "Mundo":
+                col_valor_est = "Valor Total con el Mundo (USD)"
+                col_ref_est = "Valor Total con México (USD)"
+            else:
+                col_valor_est = "Valor de la Subpartida con México (USD)"
+                col_ref_est = "Valor Total de la Sección con México (USD)"
+            
+            df_export_est = df_export_est.rename(columns={
+                "periodo": "Periodo",
+                "COM_DESC": "Subpartida",
+                "VALOR": col_valor_est,
+                "REF_VALOR": col_ref_est,
+                "Participacion": "Participación (%)"
+            })
+            
+            # Reordenar las columnas para una lectura más natural
+            orden_cols_est = ["Periodo", "Subpartida", col_valor_est, col_ref_est, "Participación (%)"]
+            df_export_est = df_export_est[orden_cols_est]
+            
+            csv_est = df_export_est.to_csv(index=False).encode('utf-8')
             st.download_button(
                 label="📥 Descargar datos de la gráfica",
                 data=csv_est,
