@@ -791,8 +791,10 @@ if selected_state_code == 'US':
 
         opciones_todas_n = opciones_especiales_n + [desc for desc, cod in dict_subs_hist_n.items() if cod not in codigos_top_previos_n]
 
-        sel_previa_n_limpia = [s for s in sel_previa_n if s in opciones_especiales_n or dict_subs_hist_n.get(s) not in codigos_top_previos_n]
-        if sel_previa_n_limpia != sel_previa_n:
+        # Comparamos por LONGITUD en lugar de identidad (List vs Tuple) para evitar el loop infinito de recargas
+        sel_previa_n_limpia = [s for s in sel_previa_n if s in opciones_todas_n]
+        
+        if len(sel_previa_n_limpia) != len(sel_previa_n):
             st.session_state["nac_h_multi"] = sel_previa_n_limpia
 
         with col_nh3:
@@ -1385,9 +1387,10 @@ else:
     opciones_todas = opciones_especiales + [desc for desc, cod in dict_subs_hist.items() if cod not in codigos_top_previos]
 
     # Si alguna subpartida manual quedó "cubierta" por el Top activo, la quitamos
-    # de la selección guardada para que no se pueda duplicar.
-    sel_previa_limpia = [s for s in sel_previa if s in opciones_especiales or dict_subs_hist.get(s) not in codigos_top_previos]
-    if sel_previa_limpia != sel_previa:
+    # Comparamos por LONGITUD para evitar el loop infinito de recargas
+    sel_previa_limpia = [s for s in sel_previa if s in opciones_todas]
+    
+    if len(sel_previa_limpia) != len(sel_previa):
         st.session_state["est_multi"] = sel_previa_limpia
     
     subp_seleccionadas = st.multiselect(
