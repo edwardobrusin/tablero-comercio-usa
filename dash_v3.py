@@ -589,6 +589,34 @@ if selected_state_code == 'US':
             key=map_key
         )
         
+        # Preparar DataFrame amigable para la exportación del mapa
+        df_export_map = df_map[['Estado', 'STATE', 'Main_Trade', 'Ref_Trade', 'Participacion', 'Var_Anual']].copy()
+        
+        # Definir nombres descriptivos según el socio comercial
+        if socio_sel_map == "Mundo":
+            col_main_map = "Valor con el Mundo (USD)"
+            col_ref_map = "Valor con México (USD)"
+        else:
+            col_main_map = "Valor con México (USD)"
+            col_ref_map = "Valor con el Mundo (USD)"
+            
+        df_export_map = df_export_map.rename(columns={
+            "STATE": "Abreviatura",
+            "Main_Trade": col_main_map,
+            "Ref_Trade": col_ref_map,
+            "Participacion": "Participación de México (%)",
+            "Var_Anual": "Variación Anual (%)"
+        })
+        
+        csv_map = df_export_map.to_csv(index=False).encode('utf-8')
+        st.download_button(
+            label="📥 Descargar datos del mapa",
+            data=csv_map,
+            file_name=f"mapa_nacional_{seccion_sel.replace(' ', '_')}_{anio_sel}.csv",
+            mime="text/csv",
+            key="btn_descarga_mapa"
+        )
+        
         clicked_state = None
         
         # Estandarizamos el objeto de selección de Streamlit a un diccionario nativo
