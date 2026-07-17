@@ -373,7 +373,7 @@ if selected_state_code == 'US':
     # ------------------------------------------
     # FILTROS NACIONALES (Se actualizan instantáneamente sin botón de confirmación)
     # ------------------------------------------
-    col_fs, col_f0, col_f1, col_f2, col_f3 = st.columns([1, 1, 1, 1.2, 1.8])
+    col_fs, col_f0, col_fvar, col_f1, col_f2, col_f3 = st.columns([1, 1, 0.9, 1, 1.2, 1.5])
     with col_fs:
         socio_sel_map = st.selectbox("Socio Comercial", ["Mundo", "México"], key="nac_socio_map")
         ruta_map_main = RUTA_TOT if socio_sel_map == "Mundo" else RUTA_MEX
@@ -386,6 +386,9 @@ if selected_state_code == 'US':
             flow_cond = "flow = 'imports'"
         else:
             flow_cond = "flow = 'exports'"
+            
+    with col_fvar:
+        variable_sel = st.selectbox("Variable", ["Monto", "Participación"], key="nac_var")
             
     with col_f1:
         # ASIGNACIÓN DE KEY: Evita que el dropdown se resetee en cada recálculo
@@ -492,9 +495,11 @@ if selected_state_code == 'US':
         df_valid = df_map[df_map['Main_Trade'] > 0].copy()
         df_missing = df_map[df_map['Main_Trade'] == 0].copy()
         
+        color_col = 'Main_Trade' if variable_sel == "Monto" else 'Participacion'
+        
         if not df_valid.empty:
-            zmin_val = float(df_valid['Main_Trade'].min())
-            zmax_val = float(df_valid['Main_Trade'].max())
+            zmin_val = float(df_valid[color_col].min())
+            zmax_val = float(df_valid[color_col].max())
         else:
             zmin_val, zmax_val = 0, 1
             
@@ -514,7 +519,7 @@ if selected_state_code == 'US':
             df_valid, 
             locations='STATE', 
             locationmode="USA-states", 
-            color='Main_Trade',
+            color=color_col,
             scope="usa",
             color_continuous_scale="Teal",
             range_color=[zmin_val, zmax_val],
@@ -641,14 +646,16 @@ if selected_state_code == 'US':
                 clicked_state = str(punto["location"])
         
         # ==========================================
-        # TOP 3 SUBPARTIDAS POR ESTADO (AL HACER CLIC EN EL MAPA)
+        # TOP 3 SUBPARTIDAS (ESTADO SELECCIONADO O NACIONAL)
         # ==========================================
-        if clicked_state and subp_sel_code == "TOTAL":
-            nombre_estado_click = US_STATES.get(clicked_state, clicked_state)
+        if subp_sel_code == "TOTAL":
+            target_state_query = clicked_state if clicked_state else '-'
+            nombre_estado_click = US_STATES.get(clicked_state, clicked_state) if clicked_state else "Nacional (Estados Unidos)"
+            
             st.markdown(f"<h3 style='margin-top: 30px; color: #0F172A; text-align: center;'>Top 3 Subpartidas: {nombre_estado_click}</h3>", unsafe_allow_html=True)
             
             is_mundo = (socio_sel_map == "Mundo")
-            label_part_tbl = "Part. MX" if is_mundo else "Part. Interna"
+            label_part_tbl = "Part. MX"
             
             # Generador de Tablas HTML estilizadas
             def generar_tabla_html(df, color_tema):
@@ -691,56 +698,46 @@ if selected_state_code == 'US':
                 return html.replace('\n', '')
 
             def get_query_top3(flujo):
+                ruta_main_q = RUTA_TOT if is_mundo else RUTA_MEX
+                ruta_ref_q = RUTA_MEX if is_mundo else RUTA_TOT
+                
                 if is_mundo:
-                    return f"""
-                        WITH top_main AS (
-                            SELECT COMMODITY, MAX(COM_DESC) as COM_DESC, SUM(VALOR) as Val_Main 
-                            FROM '{RUTA_TOT}' 
-                            WHERE STATE='{clicked_state}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
-                            GROUP BY COMMODITY 
-                            ORDER BY Val_Main DESC 
-                            LIMIT 3
-                        ),
-                        ref_data AS (
-                            SELECT COMMODITY, SUM(VALOR) as Val_Ref 
-                            FROM '{RUTA_MEX}' 
-                            WHERE STATE='{clicked_state}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
-                              AND COMMODITY IN (SELECT COMMODITY FROM top_main)
-                            GROUP BY COMMODITY
-                        )
-                        SELECT t.COMMODITY, t.COM_DESC, t.Val_Main, COALESCE(r.Val_Ref, 0) AS Val_Ref
-                        FROM top_main t LEFT JOIN ref_data r ON t.COMMODITY = r.COMMODITY
-                        ORDER BY t.Val_Main DESC
-                    """
+                    part_calc = "COALESCE(r.Val_Ref, 0) / NULLIF(m.Val_Main, 0) * 100"
                 else:
-                    return f"""
-                        WITH top_main AS (
-                            SELECT COMMODITY, MAX(COM_DESC) as COM_DESC, SUM(VALOR) as Val_Main 
-                            FROM '{RUTA_MEX}' 
-                            WHERE STATE='{clicked_state}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
-                            GROUP BY COMMODITY 
-                            ORDER BY Val_Main DESC 
-                            LIMIT 3
-                        ),
-                        total_ref AS (
-                            SELECT SUM(VALOR) as Total_Ref
-                            FROM '{RUTA_MEX}'
-                            WHERE STATE='{clicked_state}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond}
-                        )
-                        SELECT t.COMMODITY, t.COM_DESC, t.Val_Main, (SELECT Total_Ref FROM total_ref) AS Val_Ref
-                        FROM top_main t
-                        ORDER BY t.Val_Main DESC
-                    """
+                    part_calc = "m.Val_Main / NULLIF(COALESCE(r.Val_Ref, 0), 0) * 100"
+                
+                sort_order = "m.Val_Main DESC" if variable_sel == "Monto" else f"{part_calc} DESC, m.Val_Main DESC"
+                
+                return f"""
+                    WITH main_data AS (
+                        SELECT COMMODITY, MAX(COM_DESC) as COM_DESC, SUM(VALOR) as Val_Main 
+                        FROM '{ruta_main_q}' 
+                        WHERE STATE='{target_state_query}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
+                        GROUP BY COMMODITY 
+                    ),
+                    ref_data AS (
+                        SELECT COMMODITY, SUM(VALOR) as Val_Ref 
+                        FROM '{ruta_ref_q}' 
+                        WHERE STATE='{target_state_query}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
+                        GROUP BY COMMODITY
+                    )
+                    SELECT m.COMMODITY, m.COM_DESC, m.Val_Main, COALESCE(r.Val_Ref, 0) AS Val_Ref
+                    FROM main_data m LEFT JOIN ref_data r ON m.COMMODITY = r.COMMODITY
+                    ORDER BY {sort_order}
+                    LIMIT 3
+                """
 
             col_imp, col_exp = st.columns(2)
             
             with col_imp:
-                st.markdown("<h4 style='color: #2596be;'>Importaciones (El Estado Importa)</h4>", unsafe_allow_html=True)
+                titulo_imp = "Importaciones (El Estado Importa)" if clicked_state else "Importaciones (A Nivel Nacional)"
+                st.markdown(f"<h4 style='color: #2596be;'>{titulo_imp}</h4>", unsafe_allow_html=True)
                 df_ti = conn.query(get_query_top3('imports')).to_df()
                 st.markdown(generar_tabla_html(df_ti, "#2596be"), unsafe_allow_html=True)
 
             with col_exp:
-                st.markdown("<h4 style='color: #008889;'>Exportaciones (El Estado Exporta)</h4>", unsafe_allow_html=True)
+                titulo_exp = "Exportaciones (El Estado Exporta)" if clicked_state else "Exportaciones (A Nivel Nacional)"
+                st.markdown(f"<h4 style='color: #008889;'>{titulo_exp}</h4>", unsafe_allow_html=True)
                 df_te = conn.query(get_query_top3('exports')).to_df()
                 st.markdown(generar_tabla_html(df_te, "#008889"), unsafe_allow_html=True)
                 
@@ -782,7 +779,34 @@ if selected_state_code == 'US':
 
         codigos_top_previos_n = set()
         if n_lim_previo_n > 0:
-            q_top_previo_n = f"SELECT COMMODITY FROM '{ruta_hist_n}' WHERE STATE='-' AND {caps_cond} AND {flow_cond_hist_n} AND year={anio_fin_n} AND {meses_cond_hist_n} GROUP BY COMMODITY ORDER BY SUM(VALOR) DESC LIMIT {n_lim_previo_n}"
+            ruta_main_top_n = RUTA_TOT if socio_sel_n == "Mundo" else RUTA_MEX
+            ruta_ref_top_n = RUTA_MEX if socio_sel_n == "Mundo" else RUTA_TOT
+            
+            if socio_sel_n == "Mundo":
+                part_calc_n = "COALESCE(r.Val_Ref, 0) / NULLIF(m.Val_Main, 0) * 100"
+            else:
+                part_calc_n = "m.Val_Main / NULLIF(COALESCE(r.Val_Ref, 0), 0) * 100"
+                
+            sort_order_top_n = "m.Val_Main DESC" if variable_sel == "Monto" else f"{part_calc_n} DESC, m.Val_Main DESC"
+            
+            q_top_previo_n = f"""
+                WITH main_data AS (
+                    SELECT COMMODITY, SUM(VALOR) as Val_Main 
+                    FROM '{ruta_main_top_n}' 
+                    WHERE STATE='-' AND {caps_cond} AND {flow_cond_hist_n} AND year={anio_fin_n} AND {meses_cond_hist_n} 
+                    GROUP BY COMMODITY 
+                ),
+                ref_data AS (
+                    SELECT COMMODITY, SUM(VALOR) as Val_Ref 
+                    FROM '{ruta_ref_top_n}' 
+                    WHERE STATE='-' AND {caps_cond} AND {flow_cond_hist_n} AND year={anio_fin_n} AND {meses_cond_hist_n} 
+                    GROUP BY COMMODITY
+                )
+                SELECT m.COMMODITY
+                FROM main_data m LEFT JOIN ref_data r ON m.COMMODITY = r.COMMODITY
+                ORDER BY {sort_order_top_n}
+                LIMIT {n_lim_previo_n}
+            """
             df_top_previo_n = conn.query(q_top_previo_n).to_df()
             if not df_top_previo_n.empty:
                 codigos_top_previos_n.update(df_top_previo_n['COMMODITY'].tolist())
@@ -849,15 +873,17 @@ if selected_state_code == 'US':
             else:
                 q_ref_n = f"""
                 base_ref AS (
-                    SELECT {group_cols_n}, SUM(VALOR) as REF_VALOR
-                    FROM '{RUTA_MEX}'
+                    SELECT {group_cols_n}, {comm_select_n} SUM(VALOR) as REF_VALOR
+                    FROM '{RUTA_TOT}'
                     WHERE STATE='-' AND {caps_cond} AND {flow_cond_hist_n} AND year BETWEEN {anio_ini_n} AND {anio_fin_n} AND {meses_cond_hist_n}
-                    GROUP BY {group_cols_n}
+                    {filtro_cod_n}
+                    GROUP BY {group_cols_n} {comm_group_n}
                 )
                 """
                 join_ref_n = f"""
                 LEFT JOIN base_ref r ON m.year = r.year 
                     { 'AND m.month = r.month' if 'month' in group_cols_n else '' }
+                    {join_comm_ref_n}
                 """
 
             q_line_n = f"""
@@ -909,7 +935,7 @@ if selected_state_code == 'US':
                 codigos_finales_n.add(dict_subs_hist_n[s])
         hay_codigos_n = len(codigos_finales_n) > 0
         debe_graficar_n = is_total_n or hay_codigos_n
-        hover_part_label_n = "Part. MX" if socio_sel_n == "Mundo" else "Part. Interna"
+        hover_part_label_n = "Part. MX"
 
         if debe_graficar_n:
             dfs_hist_n = []
@@ -926,11 +952,16 @@ if selected_state_code == 'US':
                     df_line_n['Participacion'] = (df_line_n['VALOR'] / df_line_n['REF_VALOR']) * 100
                 df_line_n['Participacion'] = df_line_n['Participacion'].fillna(0)
                 
-                fig_line_n = px.line(df_line_n, x="periodo", y="VALOR", color="COM_DESC", markers=True, custom_data=['Participacion', 'top3_states'], hover_name="COM_DESC")
+                y_var_n = "VALOR" if variable_sel == "Monto" else "Participacion"
+                y_title_n = "Valor Comercial (USD)" if variable_sel == "Monto" else "Participación (%)"
+                tick_pref_n = "$" if variable_sel == "Monto" else ""
+                tick_suff_n = "" if variable_sel == "Monto" else "%"
+                
+                fig_line_n = px.line(df_line_n, x="periodo", y=y_var_n, color="COM_DESC", markers=True, custom_data=['VALOR', 'Participacion', 'top3_states'], hover_name="COM_DESC")
                 
                 fig_line_n.update_layout(
                     xaxis_title="", 
-                    yaxis_title="Valor Comercial (USD)", 
+                    yaxis_title=y_title_n, 
                     plot_bgcolor='#F8FAFC', 
                     paper_bgcolor='#F8FAFC',
                     legend=dict(orientation="v", yanchor="top", y=-0.08, xanchor="left", x=0, title=None, font=dict(size=11)),
@@ -938,7 +969,7 @@ if selected_state_code == 'US':
                     height=500
                 )
                 
-                fig_line_n.update_yaxes(rangemode="tozero", showgrid=True, gridcolor="#E2E8F0", linecolor="#CBD5E1", tickprefix="$")
+                fig_line_n.update_yaxes(rangemode="tozero", showgrid=True, gridcolor="#E2E8F0", linecolor="#CBD5E1", tickprefix=tick_pref_n, ticksuffix=tick_suff_n)
                 
                 if not desglosar_mes_n:
                     fig_line_n.update_xaxes(dtick=1, showgrid=True, gridcolor="#E2E8F0", linecolor="#CBD5E1")
@@ -950,9 +981,9 @@ if selected_state_code == 'US':
                     marker=dict(size=8), 
                     hovertemplate=(
                         "<span style='color:#7dd3c8; font-weight:700;'>Periodo:</span> %{x}<br>"
-                        "<span style='color:#7dd3c8; font-weight:700;'>Valor:</span> $%{y:,.0f} USD<br>"
-                        f"<span style='color:#7dd3c8; font-weight:700;'>{hover_part_label_n}:</span> %{{customdata[0]:.1f}}%<br>"
-                        "<span style='color:#7dd3c8; font-weight:700;'>Top 3 Estados:</span> %{customdata[1]}<extra></extra>"
+                        "<span style='color:#7dd3c8; font-weight:700;'>Valor:</span> $%{customdata[0]:,.0f} USD<br>"
+                        f"<span style='color:#7dd3c8; font-weight:700;'>{hover_part_label_n}:</span> %{{customdata[1]:.1f}}%<br>"
+                        "<span style='color:#7dd3c8; font-weight:700;'>Top 3 Estados:</span> %{customdata[2]}<extra></extra>"
                     ),
                     hoverlabel=dict(bgcolor='#0F172A', font_size=13, font_family='sans-serif', font_color='#F8FAFC', bordercolor='#0F172A', align='left')
                 )
@@ -965,10 +996,10 @@ if selected_state_code == 'US':
                 # Definir nombres descriptivos según el socio comercial
                 if socio_sel_n == "Mundo":
                     col_valor_n = "Valor Total con el Mundo (USD)"
-                    col_ref_n = "Valor Total con México (USD)"
+                    col_ref_n = "Valor con México (USD)"
                 else:
-                    col_valor_n = "Valor de la Subpartida con México (USD)"
-                    col_ref_n = "Valor Total de la Sección con México (USD)"
+                    col_valor_n = "Valor con México (USD)"
+                    col_ref_n = "Valor Total con el Mundo (USD)"
                 
                 df_export_n = df_export_n.rename(columns={
                     "periodo": "Periodo",
@@ -1179,8 +1210,10 @@ else:
     
     def get_top_5_mexico_base(flow_type, color_mex):
         df_m_flow = df_mex_ytd[df_mex_ytd['flow'] == flow_type]
+        df_t_flow = df_tot_ytd[df_tot_ytd['flow'] == flow_type]
         
         mex_agg = df_m_flow.groupby(['COMMODITY', 'DESC', 'year'])['VALOR'].sum().reset_index()
+        tot_agg = df_t_flow.groupby(['COMMODITY', 'year'])['VALOR'].sum().reset_index()
         
         val_mex_curr = df_m_flow[df_m_flow['year'] == max_year]['VALOR'].sum()
         val_mex_prev = df_m_flow[df_m_flow['year'] == max_year - 1]['VALOR'].sum()
@@ -1192,17 +1225,27 @@ else:
         mex_curr = mex_agg[mex_agg['year'] == max_year].rename(columns={'VALOR': 'Mex_Curr'})
         mex_prev = mex_agg[mex_agg['year'] == max_year - 1].rename(columns={'VALOR': 'Mex_Prev'})
         
+        tot_curr = tot_agg[tot_agg['year'] == max_year].rename(columns={'VALOR': 'Tot_Curr'})
+        tot_prev = tot_agg[tot_agg['year'] == max_year - 1].rename(columns={'VALOR': 'Tot_Prev'})
+        
         df_chart = mex_curr.merge(mex_prev[['COMMODITY', 'Mex_Prev']], on='COMMODITY', how='left')
         df_chart['Mex_Prev'] = df_chart['Mex_Prev'].fillna(0)
         
         top5 = df_chart.sort_values('Mex_Curr', ascending=False).head(5).copy()
         if top5.empty: return "<div style='padding:20px; color:#64748B;'>No hay datos para esta selección.</div>"
         
-        total_mex_flow = df_chart['Mex_Curr'].sum()
-        top5['Part_Interna'] = (top5['Mex_Curr'] / total_mex_flow) * 100 if total_mex_flow > 0 else 0
+        # Merge con totales mundiales para calcular Part_Mex
+        top5 = top5.merge(tot_curr[['COMMODITY', 'Tot_Curr']], on='COMMODITY', how='left')
+        top5 = top5.merge(tot_prev[['COMMODITY', 'Tot_Prev']], on='COMMODITY', how='left')
         
-        total_mex_flow_prev = df_chart['Mex_Prev'].sum()
-        top5['Part_Interna_Prev'] = (top5['Mex_Prev'] / total_mex_flow_prev) * 100 if total_mex_flow_prev > 0 else 0
+        top5['Tot_Curr'] = top5['Tot_Curr'].fillna(0)
+        top5['Tot_Prev'] = top5['Tot_Prev'].fillna(0)
+        
+        top5['Part_Mex'] = (top5['Mex_Curr'] / top5['Tot_Curr']) * 100
+        top5['Part_Mex'] = top5['Part_Mex'].replace([np.inf, -np.inf], 0).fillna(0)
+        
+        top5['Part_Mex_Prev'] = (top5['Mex_Prev'] / top5['Tot_Prev']) * 100
+        top5['Part_Mex_Prev'] = top5['Part_Mex_Prev'].replace([np.inf, -np.inf], 0).fillna(0)
         
         max_scale = max(top5['Mex_Curr'].max(), top5['Mex_Prev'].max())
         
@@ -1231,7 +1274,7 @@ else:
     <div style="display: flex; width: 100%; margin-bottom: 20px; font-weight: 800; font-size: 0.85rem; text-transform:uppercase; color: #64748B; border-bottom:2px solid #F1F5F9; padding-bottom:10px; justify-content: space-between; gap: 15px;">
     <div style="flex: 0 0 20%; text-align: left; padding-left: 5px;">Subpartida (HTS 6)</div>
     <div style="flex: 1; text-align: left; padding-left: 15px;">Valor (Dólares)</div>
-    <div style="flex: 0 0 12%; text-align: center; display: flex; flex-direction: column; justify-content: center;">Part.<br>(% Total MX)</div>
+    <div style="flex: 0 0 12%; text-align: center; display: flex; flex-direction: column; justify-content: center;">Part. MX<br>(% Total)</div>
     </div>"""
     
         for _, r in top5.iterrows():
@@ -1256,10 +1299,10 @@ else:
     </div>
     <div style="flex: 0 0 12%; display: flex; flex-direction: column; justify-content: center; gap: 8px; align-items: center;">
     <div style="background-color: #F1F5F9; border:1px solid #E2E8F0; border-radius: 6px; width: 100%; font-weight: 700; font-size: 0.75rem; color: #64748B; text-align: center; height: 22px; display: flex; align-items: center; justify-content: center;">
-    {r['Part_Interna_Prev']:.1f}%
+    {r['Part_Mex_Prev']:.1f}%
     </div>
     <div style="background-color: #F8FAFC; border:1px solid #E2E8F0; border-radius: 6px; width: 100%; font-weight: 800; font-size: 0.85rem; color: {color_mex}; text-align: center; height: 26px; display: flex; align-items: center; justify-content: center;">
-    {r['Part_Interna']:.1f}%
+    {r['Part_Mex']:.1f}%
     </div>
     </div>
     </div>"""
@@ -1317,13 +1360,15 @@ else:
     st.markdown("<hr style='border-color: #E2E8F0; border-width: 2px; margin-top:20px; margin-bottom:20px;'>", unsafe_allow_html=True)
     st.markdown(f"<h3 style='color: #0F172A; margin-bottom: 20px;'>Evolución Histórica: Subpartidas Principales</h3>", unsafe_allow_html=True)
     
-    col_h1, col_h2, col_h3, col_h4, col_h5 = st.columns(5)
+    col_h1, col_h2, col_hvar, col_h3, col_h4, col_h5 = st.columns([1, 1, 0.9, 1, 1, 1])
     with col_h1:
         socio_sel = st.selectbox("Socio Comercial", ["Mundo", "México"], key="est_socio")
         ruta_hist = RUTA_TOT if socio_sel == "Mundo" else RUTA_MEX
     with col_h2:
         flujo_hist = st.selectbox("Flujo Comercial", ["Comercio Total", "Importaciones", "Exportaciones"], key="est_flujo")
         flow_cond_hist = "1=1" if flujo_hist == "Comercio Total" else ("flow = 'imports'" if flujo_hist == "Importaciones" else "flow = 'exports'")
+    with col_hvar:
+        variable_sel_est = st.selectbox("Variable", ["Monto", "Participación"], key="est_var")
     with col_h3:
         per_hist = st.selectbox("Tipo de Periodo", ["YTD", "Anual", "Mensual", "Mes Específico", "Acumulado"], key="est_per")
     with col_h4:
@@ -1377,7 +1422,34 @@ else:
 
     codigos_top_previos = set()
     if n_lim_previo > 0:
-        q_top_previo = f"SELECT COMMODITY FROM '{ruta_hist}' WHERE STATE='{selected_state_code}' AND {caps_cond} AND {flow_cond_hist} AND year={anio_fin} AND {meses_cond_hist} GROUP BY COMMODITY ORDER BY SUM(VALOR) DESC LIMIT {n_lim_previo}"
+        ruta_main_top = RUTA_TOT if socio_sel == "Mundo" else RUTA_MEX
+        ruta_ref_top = RUTA_MEX if socio_sel == "Mundo" else RUTA_TOT
+        
+        if socio_sel == "Mundo":
+            part_calc = "COALESCE(r.Val_Ref, 0) / NULLIF(m.Val_Main, 0) * 100"
+        else:
+            part_calc = "m.Val_Main / NULLIF(COALESCE(r.Val_Ref, 0), 0) * 100"
+            
+        sort_order_top = "m.Val_Main DESC" if variable_sel_est == "Monto" else f"{part_calc} DESC, m.Val_Main DESC"
+        
+        q_top_previo = f"""
+            WITH main_data AS (
+                SELECT COMMODITY, SUM(VALOR) as Val_Main 
+                FROM '{ruta_main_top}' 
+                WHERE STATE='{selected_state_code}' AND {caps_cond} AND {flow_cond_hist} AND year={anio_fin} AND {meses_cond_hist} 
+                GROUP BY COMMODITY 
+            ),
+            ref_data AS (
+                SELECT COMMODITY, SUM(VALOR) as Val_Ref 
+                FROM '{ruta_ref_top}' 
+                WHERE STATE='{selected_state_code}' AND {caps_cond} AND {flow_cond_hist} AND year={anio_fin} AND {meses_cond_hist} 
+                GROUP BY COMMODITY
+            )
+            SELECT m.COMMODITY
+            FROM main_data m LEFT JOIN ref_data r ON m.COMMODITY = r.COMMODITY
+            ORDER BY {sort_order_top}
+            LIMIT {n_lim_previo}
+        """
         df_top_previo = conn.query(q_top_previo).to_df()
         if not df_top_previo.empty:
             codigos_top_previos.update(df_top_previo['COMMODITY'].tolist())
@@ -1461,16 +1533,20 @@ else:
                     {filtro_cod}
                     GROUP BY {group_cols} {grp_comm}
                 ),
-                base_mex_total AS (
-                    SELECT {group_cols}, SUM(VALOR) as TOTAL_SECCION
-                    FROM '{RUTA_MEX}'
+                base_tot AS (
+                    SELECT {group_cols},
+                           {sel_comm}
+                           SUM(VALOR) as REF_VALOR
+                    FROM '{RUTA_TOT}'
                     WHERE STATE='{selected_state_code}' AND {caps_cond} AND {flow_cond_hist} AND year BETWEEN {anio_ini} AND {anio_fin} AND {meses_cond_hist}
-                    GROUP BY {group_cols}
+                    {filtro_cod}
+                    GROUP BY {group_cols} {grp_comm}
                 )
-                SELECT m.periodo, m.COM_DESC, m.VALOR, COALESCE(mt.TOTAL_SECCION, 0) as REF_VALOR
+                SELECT m.periodo, m.COM_DESC, m.VALOR, COALESCE(t.REF_VALOR, 0) as REF_VALOR
                 FROM base_mex m
-                LEFT JOIN base_mex_total mt ON m.year = mt.year 
-                    { 'AND m.month = mt.month' if 'month' in group_cols else '' }
+                LEFT JOIN base_tot t ON m.year = t.year 
+                    { 'AND m.month = t.month' if 'month' in group_cols else '' }
+                    {join_comm}
                 ORDER BY m.{order_cols.replace(', ', ', m.')}
             """
         return conn.query(q).to_df()
@@ -1482,7 +1558,7 @@ else:
             codigos_finales.add(dict_subs_hist[s])
     hay_codigos = len(codigos_finales) > 0
     debe_graficar = is_total or hay_codigos
-    hover_part_label = "Part. MX" if socio_sel == "Mundo" else "Part. Interna"
+    hover_part_label = "Part. MX"
 
     if debe_graficar:
         dfs_hist = []
@@ -1502,11 +1578,16 @@ else:
             df_line['Participacion'] = df_line['Participacion'].fillna(0)
             
             # Construcción de Gráfica Plotly
-            fig_line = px.line(df_line, x="periodo", y="VALOR", color="COM_DESC", markers=True, custom_data=['Participacion'], hover_name="COM_DESC")
+            y_var_est = "VALOR" if variable_sel_est == "Monto" else "Participacion"
+            y_title_est = "Valor Comercial (USD)" if variable_sel_est == "Monto" else "Participación (%)"
+            tick_pref_est = "$" if variable_sel_est == "Monto" else ""
+            tick_suff_est = "" if variable_sel_est == "Monto" else "%"
+            
+            fig_line = px.line(df_line, x="periodo", y=y_var_est, color="COM_DESC", markers=True, custom_data=['VALOR', 'Participacion'], hover_name="COM_DESC")
             
             fig_line.update_layout(
                 xaxis_title="", 
-                yaxis_title="Dólares", 
+                yaxis_title=y_title_est, 
                 plot_bgcolor='#F8FAFC', 
                 paper_bgcolor='#F8FAFC',
                 # Orientación vertical; margin_autoexpand evitará huecos en blanco dinámicamente
@@ -1516,7 +1597,7 @@ else:
             )
             
             # Forzamos el inicio en 0
-            fig_line.update_yaxes(rangemode="tozero", showgrid=True, gridcolor="#E2E8F0", linecolor="#CBD5E1", tickprefix="$")
+            fig_line.update_yaxes(rangemode="tozero", showgrid=True, gridcolor="#E2E8F0", linecolor="#CBD5E1", tickprefix=tick_pref_est, ticksuffix=tick_suff_est)
             
             if per_hist != "Mensual":
                 fig_line.update_xaxes(dtick=1, showgrid=True, gridcolor="#E2E8F0", linecolor="#CBD5E1")
@@ -1528,8 +1609,8 @@ else:
                 marker=dict(size=8), 
                 hovertemplate=(
                     "<span style='color:#7dd3c8; font-weight:700;'>Periodo:</span> %{x}<br>"
-                    "<span style='color:#7dd3c8; font-weight:700;'>Valor:</span> $%{y:,.0f} USD<br>"
-                    f"<span style='color:#7dd3c8; font-weight:700;'>{hover_part_label}:</span> %{{customdata[0]:.1f}}%<extra></extra>"
+                    "<span style='color:#7dd3c8; font-weight:700;'>Valor:</span> $%{customdata[0]:,.0f} USD<br>"
+                    f"<span style='color:#7dd3c8; font-weight:700;'>{hover_part_label}:</span> %{{customdata[1]:.1f}}%<extra></extra>"
                 ),
                 hoverlabel=dict(bgcolor='#0F172A', font_size=13, font_family='sans-serif', font_color='#F8FAFC', bordercolor='#0F172A', align='left')
             )
@@ -1542,10 +1623,10 @@ else:
             # Definir nombres descriptivos según el socio comercial
             if socio_sel == "Mundo":
                 col_valor_est = "Valor Total con el Mundo (USD)"
-                col_ref_est = "Valor Total con México (USD)"
+                col_ref_est = "Valor con México (USD)"
             else:
-                col_valor_est = "Valor de la Subpartida con México (USD)"
-                col_ref_est = "Valor Total de la Sección con México (USD)"
+                col_valor_est = "Valor con México (USD)"
+                col_ref_est = "Valor Total con el Mundo (USD)"
             
             df_export_est = df_export_est.rename(columns={
                 "periodo": "Periodo",
