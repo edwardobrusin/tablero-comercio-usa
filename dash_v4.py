@@ -7,6 +7,9 @@ import gc
 import duckdb
 import plotly.express as px
 
+# Conexión local dedicada a este hilo (mantiene la lectura out-of-core sin consumir RAM extra)
+conn = duckdb.connect()
+
 def _alternar_top_exclusivo(key):
     """Hace que 'Top 5' y 'Top 10 Subpartidas' sean mutuamente excluyentes:
     al activar uno de los dos, se desactiva automáticamente el otro."""
@@ -357,10 +360,10 @@ else:
     caps_cond = f"Chapter IN ({caps_sql})"
 
 # Extraemos la metadata temporal general
-max_year = int(duckdb.query(f"SELECT MAX(year) FROM '{RUTA_TOT}'").fetchone()[0])
-todos_los_anios_query = duckdb.query(f"SELECT DISTINCT year FROM '{RUTA_TOT}' ORDER BY year DESC").fetchall()
+max_year = int(conn.query(f"SELECT MAX(year) FROM '{RUTA_TOT}'").fetchone()[0])
+todos_los_anios_query = conn.query(f"SELECT DISTINCT year FROM '{RUTA_TOT}' ORDER BY year DESC").fetchall()
 lista_anios = [int(a[0]) for a in todos_los_anios_query]
-meses_max_year_query = duckdb.query(f"SELECT DISTINCT month FROM '{RUTA_TOT}' WHERE year = {max_year}").fetchall()
+meses_max_year_query = conn.query(f"SELECT DISTINCT month FROM '{RUTA_TOT}' WHERE year = {max_year}").fetchall()
 meses_list = sorted([m[0] for m in meses_max_year_query])
 
 if selected_state_code == 'US':
@@ -390,7 +393,7 @@ if selected_state_code == 'US':
     with col_f2:
         periodo_sel = st.selectbox("Tipo de Periodo", ["YTD", "Anual", "Mensual", "Acumulado"], key="nac_per")
         
-    meses_query = duckdb.query(f"SELECT DISTINCT month FROM '{RUTA_TOT}' WHERE year = {anio_sel} ORDER BY month").fetchall()
+    meses_query = conn.query(f"SELECT DISTINCT month FROM '{RUTA_TOT}' WHERE year = {anio_sel} ORDER BY month").fetchall()
     lista_meses_act = sorted([m[0] for m in meses_query])
     meses_cond = "1=1"
     
@@ -398,7 +401,7 @@ if selected_state_code == 'US':
         # Los selectores dinámicos se anidan aquí para no romper el layout
         if periodo_sel == "YTD":
             if lista_meses_act:
-                mes_max_global = duckdb.query(f"SELECT MAX(month) FROM '{RUTA_TOT}' WHERE year = {max_year}").fetchone()[0]
+                mes_max_global = conn.query(f"SELECT MAX(month) FROM '{RUTA_TOT}' WHERE year = {max_year}").fetchone()[0]
                 m_sql = ", ".join([str(m) for m in lista_meses_act if m <= mes_max_global])
                 meses_cond = f"month IN ({m_sql})" if m_sql else "1=0"
         elif periodo_sel == "Mensual":
@@ -415,7 +418,7 @@ if selected_state_code == 'US':
 
     with col_f3:
         q_subs = f"SELECT DISTINCT COMMODITY, COM_DESC FROM '{RUTA_TOT}' WHERE {caps_cond} AND {flow_cond} AND year = {anio_sel} AND {meses_cond} ORDER BY COMMODITY"
-        df_subs = duckdb.query(q_subs).to_df()
+        df_subs = conn.query(q_subs).to_df()
         
         dict_subs = {"Total de la sección": "TOTAL"}
         if not df_subs.empty:
@@ -438,11 +441,11 @@ if selected_state_code == 'US':
     q_map_main_prev = f"SELECT STATE, SUM(VALOR) as Main_Trade_Prev FROM '{ruta_map_main}' WHERE {caps_cond} AND {flow_cond} AND year = {anio_previo} AND {meses_cond} AND {subp_cond} GROUP BY STATE"
     q_map_ref_curr = f"SELECT STATE, SUM(VALOR) as Ref_Trade FROM '{ruta_map_ref}' WHERE {caps_cond} AND {flow_cond} AND year = {anio_sel} AND {meses_cond} AND {subp_cond} GROUP BY STATE"
     
-    df_map_curr = duckdb.query(q_map_main_curr).to_df()
+    df_map_curr = conn.query(q_map_main_curr).to_df()
     
     if not df_map_curr.empty:
-        df_map_prev = duckdb.query(q_map_main_prev).to_df()
-        df_map_ref = duckdb.query(q_map_ref_curr).to_df()
+        df_map_prev = conn.query(q_map_main_prev).to_df()
+        df_map_ref = conn.query(q_map_ref_curr).to_df()
         
         df_map = df_map_curr.merge(df_map_prev, on='STATE', how='left').fillna(0)
         df_map = df_map.merge(df_map_ref, on='STATE', how='left').fillna(0)
@@ -636,11 +639,6 @@ if selected_state_code == 'US':
             # 2. Prioridad Media: location nativo de Plotly
             elif "location" in punto:
                 clicked_state = str(punto["location"])
-            # 3. Prioridad Respaldo: Intercepción matemática por índice
-            else:
-                idx = punto.get("point_index") if "point_index" in punto else punto.get("point_number")
-                if idx is not None and 0 <= idx < len(df_map):
-                    clicked_state = str(df_map.iloc[idx]['STATE'])
         
         # ==========================================
         # TOP 3 SUBPARTIDAS POR ESTADO (AL HACER CLIC EN EL MAPA)
@@ -738,12 +736,12 @@ if selected_state_code == 'US':
             
             with col_imp:
                 st.markdown("<h4 style='color: #2596be;'>Importaciones (El Estado Importa)</h4>", unsafe_allow_html=True)
-                df_ti = duckdb.query(get_query_top3('imports')).to_df()
+                df_ti = conn.query(get_query_top3('imports')).to_df()
                 st.markdown(generar_tabla_html(df_ti, "#2596be"), unsafe_allow_html=True)
 
             with col_exp:
                 st.markdown("<h4 style='color: #008889;'>Exportaciones (El Estado Exporta)</h4>", unsafe_allow_html=True)
-                df_te = duckdb.query(get_query_top3('exports')).to_df()
+                df_te = conn.query(get_query_top3('exports')).to_df()
                 st.markdown(generar_tabla_html(df_te, "#008889"), unsafe_allow_html=True)
                 
         # ==========================================
@@ -770,7 +768,7 @@ if selected_state_code == 'US':
             
         # Calculamos las opciones del multiselect usando los años seleccionados arriba
         q_subs_hist_n = f"SELECT DISTINCT COMMODITY, COM_DESC FROM '{ruta_hist_n}' WHERE STATE='-' AND {caps_cond} AND {flow_cond_hist_n} AND year BETWEEN {anio_ini_n} AND {anio_fin_n} ORDER BY COMMODITY"
-        df_subs_hist_n = duckdb.query(q_subs_hist_n).to_df()
+        df_subs_hist_n = conn.query(q_subs_hist_n).to_df()
         
         dict_subs_hist_n = {}
         if not df_subs_hist_n.empty:
@@ -785,7 +783,7 @@ if selected_state_code == 'US':
         codigos_top_previos_n = set()
         if n_lim_previo_n > 0:
             q_top_previo_n = f"SELECT COMMODITY FROM '{ruta_hist_n}' WHERE STATE='-' AND {caps_cond} AND {flow_cond_hist_n} AND year={anio_fin_n} AND {meses_cond_hist_n} GROUP BY COMMODITY ORDER BY SUM(VALOR) DESC LIMIT {n_lim_previo_n}"
-            df_top_previo_n = duckdb.query(q_top_previo_n).to_df()
+            df_top_previo_n = conn.query(q_top_previo_n).to_df()
             if not df_top_previo_n.empty:
                 codigos_top_previos_n.update(df_top_previo_n['COMMODITY'].tolist())
 
@@ -902,7 +900,7 @@ if selected_state_code == 'US':
                     {join_comm_ts_n}
                 ORDER BY m.{order_cols_n.replace(', ', ', m.')}
             """
-            return duckdb.query(q_line_n).to_df()
+            return conn.query(q_line_n).to_df()
 
         is_total_n = "Total de la Sección" in subp_sel_n
         codigos_finales_n = set(codigos_top_previos_n)
@@ -1019,8 +1017,8 @@ else:
           AND month IN ({meses_sql})
     """
     
-    df_mex_ytd = duckdb.query(query_base % RUTA_MEX).to_df()
-    df_tot_ytd = duckdb.query(query_base % RUTA_TOT).to_df()
+    df_mex_ytd = conn.query(query_base % RUTA_MEX).to_df()
+    df_tot_ytd = conn.query(query_base % RUTA_TOT).to_df()
     
     MONTH_MAP = {"01":"Ene", "02":"Feb", "03":"Mar", "04":"Abr", "05":"May", "06":"Jun", 
                  "07":"Jul", "08":"Ago", "09":"Sep", "10":"Oct", "11":"Nov", "12":"Dic"}
@@ -1038,8 +1036,8 @@ else:
         query_tot = f"SELECT SUM(CAST(VALOR AS DOUBLE)) FROM '{RUTA_TOT}' WHERE STATE = '{selected_state_code}' AND {caps_cond} AND flow = '{flow_type}' AND year = {max_year - 1}"
         query_mex = f"SELECT SUM(CAST(VALOR AS DOUBLE)) FROM '{RUTA_MEX}' WHERE STATE = '{selected_state_code}' AND {caps_cond} AND flow = '{flow_type}' AND year = {max_year - 1}"
         
-        tot_prev_year = duckdb.query(query_tot).fetchone()[0] or 0
-        mex_prev_year = duckdb.query(query_mex).fetchone()[0] or 0
+        tot_prev_year = conn.query(query_tot).fetchone()[0] or 0
+        mex_prev_year = conn.query(query_mex).fetchone()[0] or 0
     
         pct_mex = (mex_prev_year / tot_prev_year * 100) if tot_prev_year > 0 else 0
     
@@ -1362,7 +1360,7 @@ else:
     
     # Pre-calcular subpartidas disponibles en el rango
     q_subs_hist = f"SELECT DISTINCT COMMODITY, COM_DESC FROM '{ruta_hist}' WHERE STATE='{selected_state_code}' AND {caps_cond} AND {flow_cond_hist} AND year BETWEEN {anio_ini} AND {anio_fin} ORDER BY COMMODITY"
-    df_subs_hist = duckdb.query(q_subs_hist).to_df()
+    df_subs_hist = conn.query(q_subs_hist).to_df()
     
     dict_subs_hist = {}
     if not df_subs_hist.empty:
@@ -1380,7 +1378,7 @@ else:
     codigos_top_previos = set()
     if n_lim_previo > 0:
         q_top_previo = f"SELECT COMMODITY FROM '{ruta_hist}' WHERE STATE='{selected_state_code}' AND {caps_cond} AND {flow_cond_hist} AND year={anio_fin} AND {meses_cond_hist} GROUP BY COMMODITY ORDER BY SUM(VALOR) DESC LIMIT {n_lim_previo}"
-        df_top_previo = duckdb.query(q_top_previo).to_df()
+        df_top_previo = conn.query(q_top_previo).to_df()
         if not df_top_previo.empty:
             codigos_top_previos.update(df_top_previo['COMMODITY'].tolist())
 
@@ -1475,7 +1473,7 @@ else:
                     { 'AND m.month = mt.month' if 'month' in group_cols else '' }
                 ORDER BY m.{order_cols.replace(', ', ', m.')}
             """
-        return duckdb.query(q).to_df()
+        return conn.query(q).to_df()
 
     is_total = "Total de la Sección" in subp_seleccionadas
     codigos_finales = set(codigos_top_previos)
@@ -1605,3 +1603,4 @@ else:
     del df_mex_ytd
     del df_tot_ytd
     gc.collect()
+    conn.close()
