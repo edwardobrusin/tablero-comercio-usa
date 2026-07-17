@@ -373,7 +373,7 @@ if selected_state_code == 'US':
     # ------------------------------------------
     # FILTROS NACIONALES (Se actualizan instantáneamente sin botón de confirmación)
     # ------------------------------------------
-    col_fs, col_f0, col_fvar, col_f1, col_f2, col_f3 = st.columns([1, 1, 0.9, 1, 1.2, 1.5])
+    col_fs, col_f0, col_f1, col_f2, col_f3 = st.columns([1, 1, 1, 1.2, 1.8])
     with col_fs:
         socio_sel_map = st.selectbox("Socio Comercial", ["Mundo", "México"], key="nac_socio_map")
         ruta_map_main = RUTA_TOT if socio_sel_map == "Mundo" else RUTA_MEX
@@ -386,9 +386,6 @@ if selected_state_code == 'US':
             flow_cond = "flow = 'imports'"
         else:
             flow_cond = "flow = 'exports'"
-            
-    with col_fvar:
-        variable_sel = st.selectbox("Variable", ["Monto", "Participación"], key="nac_var")
             
     with col_f1:
         # ASIGNACIÓN DE KEY: Evita que el dropdown se resetee en cada recálculo
@@ -495,11 +492,9 @@ if selected_state_code == 'US':
         df_valid = df_map[df_map['Main_Trade'] > 0].copy()
         df_missing = df_map[df_map['Main_Trade'] == 0].copy()
         
-        color_col = 'Main_Trade' if variable_sel == "Monto" else 'Participacion'
-        
         if not df_valid.empty:
-            zmin_val = float(df_valid[color_col].min())
-            zmax_val = float(df_valid[color_col].max())
+            zmin_val = float(df_valid['Main_Trade'].min())
+            zmax_val = float(df_valid['Main_Trade'].max())
         else:
             zmin_val, zmax_val = 0, 1
             
@@ -519,7 +514,7 @@ if selected_state_code == 'US':
             df_valid, 
             locations='STATE', 
             locationmode="USA-states", 
-            color=color_col,
+            color='Main_Trade',
             scope="usa",
             color_continuous_scale="Teal",
             range_color=[zmin_val, zmax_val],
@@ -698,34 +693,48 @@ if selected_state_code == 'US':
                 return html.replace('\n', '')
 
             def get_query_top3(flujo):
-                ruta_main_q = RUTA_TOT if is_mundo else RUTA_MEX
-                ruta_ref_q = RUTA_MEX if is_mundo else RUTA_TOT
-                
                 if is_mundo:
-                    part_calc = "COALESCE(r.Val_Ref, 0) / NULLIF(m.Val_Main, 0) * 100"
+                    return f"""
+                        WITH top_main AS (
+                            SELECT COMMODITY, MAX(COM_DESC) as COM_DESC, SUM(VALOR) as Val_Main 
+                            FROM '{RUTA_TOT}' 
+                            WHERE STATE='{target_state_query}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
+                            GROUP BY COMMODITY 
+                            ORDER BY Val_Main DESC 
+                            LIMIT 3
+                        ),
+                        ref_data AS (
+                            SELECT COMMODITY, SUM(VALOR) as Val_Ref 
+                            FROM '{RUTA_MEX}' 
+                            WHERE STATE='{target_state_query}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
+                              AND COMMODITY IN (SELECT COMMODITY FROM top_main)
+                            GROUP BY COMMODITY
+                        )
+                        SELECT t.COMMODITY, t.COM_DESC, t.Val_Main, COALESCE(r.Val_Ref, 0) AS Val_Ref
+                        FROM top_main t LEFT JOIN ref_data r ON t.COMMODITY = r.COMMODITY
+                        ORDER BY t.Val_Main DESC
+                    """
                 else:
-                    part_calc = "m.Val_Main / NULLIF(COALESCE(r.Val_Ref, 0), 0) * 100"
-                
-                sort_order = "m.Val_Main DESC" if variable_sel == "Monto" else f"{part_calc} DESC, m.Val_Main DESC"
-                
-                return f"""
-                    WITH main_data AS (
-                        SELECT COMMODITY, MAX(COM_DESC) as COM_DESC, SUM(VALOR) as Val_Main 
-                        FROM '{ruta_main_q}' 
-                        WHERE STATE='{target_state_query}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
-                        GROUP BY COMMODITY 
-                    ),
-                    ref_data AS (
-                        SELECT COMMODITY, SUM(VALOR) as Val_Ref 
-                        FROM '{ruta_ref_q}' 
-                        WHERE STATE='{target_state_query}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
-                        GROUP BY COMMODITY
-                    )
-                    SELECT m.COMMODITY, m.COM_DESC, m.Val_Main, COALESCE(r.Val_Ref, 0) AS Val_Ref
-                    FROM main_data m LEFT JOIN ref_data r ON m.COMMODITY = r.COMMODITY
-                    ORDER BY {sort_order}
-                    LIMIT 3
-                """
+                    return f"""
+                        WITH top_main AS (
+                            SELECT COMMODITY, MAX(COM_DESC) as COM_DESC, SUM(VALOR) as Val_Main 
+                            FROM '{RUTA_MEX}' 
+                            WHERE STATE='{target_state_query}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
+                            GROUP BY COMMODITY 
+                            ORDER BY Val_Main DESC 
+                            LIMIT 3
+                        ),
+                        ref_data AS (
+                            SELECT COMMODITY, SUM(VALOR) as Val_Ref 
+                            FROM '{RUTA_TOT}' 
+                            WHERE STATE='{target_state_query}' AND flow='{flujo}' AND {caps_cond} AND year={anio_sel} AND {meses_cond} AND {subp_cond} 
+                              AND COMMODITY IN (SELECT COMMODITY FROM top_main)
+                            GROUP BY COMMODITY
+                        )
+                        SELECT t.COMMODITY, t.COM_DESC, t.Val_Main, COALESCE(r.Val_Ref, 0) AS Val_Ref
+                        FROM top_main t LEFT JOIN ref_data r ON t.COMMODITY = r.COMMODITY
+                        ORDER BY t.Val_Main DESC
+                    """
 
             col_imp, col_exp = st.columns(2)
             
@@ -755,9 +764,11 @@ if selected_state_code == 'US':
         per_hist_n = periodo_sel
         meses_cond_hist_n = meses_cond  # Usa la misma condición de meses calculada para el mapa
 
-        # 2. Selectores de Año y Multiselect en la misma fila (Proporciones: 1, 1, 2.5 para dar más espacio a los nombres de subpartidas)
-        col_nh1, col_nh2, col_nh3 = st.columns([1, 1, 2.5])
+        # 2. Selectores de Año y Multiselect en la misma fila
+        col_nhvar, col_nh1, col_nh2, col_nh3 = st.columns([1, 1, 1, 2.5])
         
+        with col_nhvar:
+            variable_sel_nac = st.selectbox("Vista", ["Monto", "Participación"], key="nac_h_var")
         with col_nh1:
             anio_ini_n = st.selectbox("Año Inicio", sorted(lista_anios), key="nac_h_aini", index=0)
         with col_nh2:
@@ -779,34 +790,7 @@ if selected_state_code == 'US':
 
         codigos_top_previos_n = set()
         if n_lim_previo_n > 0:
-            ruta_main_top_n = RUTA_TOT if socio_sel_n == "Mundo" else RUTA_MEX
-            ruta_ref_top_n = RUTA_MEX if socio_sel_n == "Mundo" else RUTA_TOT
-            
-            if socio_sel_n == "Mundo":
-                part_calc_n = "COALESCE(r.Val_Ref, 0) / NULLIF(m.Val_Main, 0) * 100"
-            else:
-                part_calc_n = "m.Val_Main / NULLIF(COALESCE(r.Val_Ref, 0), 0) * 100"
-                
-            sort_order_top_n = "m.Val_Main DESC" if variable_sel == "Monto" else f"{part_calc_n} DESC, m.Val_Main DESC"
-            
-            q_top_previo_n = f"""
-                WITH main_data AS (
-                    SELECT COMMODITY, SUM(VALOR) as Val_Main 
-                    FROM '{ruta_main_top_n}' 
-                    WHERE STATE='-' AND {caps_cond} AND {flow_cond_hist_n} AND year={anio_fin_n} AND {meses_cond_hist_n} 
-                    GROUP BY COMMODITY 
-                ),
-                ref_data AS (
-                    SELECT COMMODITY, SUM(VALOR) as Val_Ref 
-                    FROM '{ruta_ref_top_n}' 
-                    WHERE STATE='-' AND {caps_cond} AND {flow_cond_hist_n} AND year={anio_fin_n} AND {meses_cond_hist_n} 
-                    GROUP BY COMMODITY
-                )
-                SELECT m.COMMODITY
-                FROM main_data m LEFT JOIN ref_data r ON m.COMMODITY = r.COMMODITY
-                ORDER BY {sort_order_top_n}
-                LIMIT {n_lim_previo_n}
-            """
+            q_top_previo_n = f"SELECT COMMODITY FROM '{ruta_hist_n}' WHERE STATE='-' AND {caps_cond} AND {flow_cond_hist_n} AND year={anio_fin_n} AND {meses_cond_hist_n} GROUP BY COMMODITY ORDER BY SUM(VALOR) DESC LIMIT {n_lim_previo_n}"
             df_top_previo_n = conn.query(q_top_previo_n).to_df()
             if not df_top_previo_n.empty:
                 codigos_top_previos_n.update(df_top_previo_n['COMMODITY'].tolist())
@@ -952,10 +936,10 @@ if selected_state_code == 'US':
                     df_line_n['Participacion'] = (df_line_n['VALOR'] / df_line_n['REF_VALOR']) * 100
                 df_line_n['Participacion'] = df_line_n['Participacion'].fillna(0)
                 
-                y_var_n = "VALOR" if variable_sel == "Monto" else "Participacion"
-                y_title_n = "Valor Comercial (USD)" if variable_sel == "Monto" else "Participación (%)"
-                tick_pref_n = "$" if variable_sel == "Monto" else ""
-                tick_suff_n = "" if variable_sel == "Monto" else "%"
+                y_var_n = "VALOR" if variable_sel_nac == "Monto" else "Participacion"
+                y_title_n = "Valor Comercial (USD)" if variable_sel_nac == "Monto" else "Participación (%)"
+                tick_pref_n = "$" if variable_sel_nac == "Monto" else ""
+                tick_suff_n = "" if variable_sel_nac == "Monto" else "%"
                 
                 fig_line_n = px.line(df_line_n, x="periodo", y=y_var_n, color="COM_DESC", markers=True, custom_data=['VALOR', 'Participacion', 'top3_states'], hover_name="COM_DESC")
                 
@@ -1368,7 +1352,7 @@ else:
         flujo_hist = st.selectbox("Flujo Comercial", ["Comercio Total", "Importaciones", "Exportaciones"], key="est_flujo")
         flow_cond_hist = "1=1" if flujo_hist == "Comercio Total" else ("flow = 'imports'" if flujo_hist == "Importaciones" else "flow = 'exports'")
     with col_hvar:
-        variable_sel_est = st.selectbox("Variable", ["Monto", "Participación"], key="est_var")
+        variable_sel_est = st.selectbox("Vista", ["Monto", "Participación"], key="est_var")
     with col_h3:
         per_hist = st.selectbox("Tipo de Periodo", ["YTD", "Anual", "Mensual", "Mes Específico", "Acumulado"], key="est_per")
     with col_h4:
@@ -1422,34 +1406,7 @@ else:
 
     codigos_top_previos = set()
     if n_lim_previo > 0:
-        ruta_main_top = RUTA_TOT if socio_sel == "Mundo" else RUTA_MEX
-        ruta_ref_top = RUTA_MEX if socio_sel == "Mundo" else RUTA_TOT
-        
-        if socio_sel == "Mundo":
-            part_calc = "COALESCE(r.Val_Ref, 0) / NULLIF(m.Val_Main, 0) * 100"
-        else:
-            part_calc = "m.Val_Main / NULLIF(COALESCE(r.Val_Ref, 0), 0) * 100"
-            
-        sort_order_top = "m.Val_Main DESC" if variable_sel_est == "Monto" else f"{part_calc} DESC, m.Val_Main DESC"
-        
-        q_top_previo = f"""
-            WITH main_data AS (
-                SELECT COMMODITY, SUM(VALOR) as Val_Main 
-                FROM '{ruta_main_top}' 
-                WHERE STATE='{selected_state_code}' AND {caps_cond} AND {flow_cond_hist} AND year={anio_fin} AND {meses_cond_hist} 
-                GROUP BY COMMODITY 
-            ),
-            ref_data AS (
-                SELECT COMMODITY, SUM(VALOR) as Val_Ref 
-                FROM '{ruta_ref_top}' 
-                WHERE STATE='{selected_state_code}' AND {caps_cond} AND {flow_cond_hist} AND year={anio_fin} AND {meses_cond_hist} 
-                GROUP BY COMMODITY
-            )
-            SELECT m.COMMODITY
-            FROM main_data m LEFT JOIN ref_data r ON m.COMMODITY = r.COMMODITY
-            ORDER BY {sort_order_top}
-            LIMIT {n_lim_previo}
-        """
+        q_top_previo = f"SELECT COMMODITY FROM '{ruta_hist}' WHERE STATE='{selected_state_code}' AND {caps_cond} AND {flow_cond_hist} AND year={anio_fin} AND {meses_cond_hist} GROUP BY COMMODITY ORDER BY SUM(VALOR) DESC LIMIT {n_lim_previo}"
         df_top_previo = conn.query(q_top_previo).to_df()
         if not df_top_previo.empty:
             codigos_top_previos.update(df_top_previo['COMMODITY'].tolist())
