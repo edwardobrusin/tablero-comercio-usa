@@ -323,10 +323,10 @@ RUTA_TOT = "data/intermediate/total/*.parquet"
 # st.sidebar.markdown("<hr style='margin-top: 5px; margin-bottom: 15px;'>", unsafe_allow_html=True)
 
 # Selector de Sección HTS
-st.sidebar.markdown("<h3 style='font-size: 1.1rem; color:#0F172A; margin-bottom: 5px;'>1. Sección Arancelaria</h3>", unsafe_allow_html=True)
+st.sidebar.markdown("<h3 style='font-size: 1.1rem; color:#0F172A; margin-bottom: 5px;'>1. Sección (HTS)</h3>", unsafe_allow_html=True)
 seccion_sel = st.sidebar.selectbox("Filtro HTS", list(HTS_SECTIONS.keys()), label_visibility="collapsed")
 
-st.sidebar.markdown("<h3 style='font-size: 1.1rem; color:#0F172A; margin-top: 15px; margin-bottom: 10px;'>2. Selecciona Estado</h3>", unsafe_allow_html=True)
+st.sidebar.markdown("<h3 style='font-size: 1.1rem; color:#0F172A; margin-top: 15px; margin-bottom: 10px;'>2. Estado</h3>", unsafe_allow_html=True)
 
 if 'estado_us_sel' not in st.session_state:
     st.session_state['estado_us_sel'] = 'US'
@@ -425,7 +425,7 @@ if selected_state_code == 'US':
             for _, r in df_subs.iterrows():
                 dict_subs[r['COM_DESC']] = r['COMMODITY']  # blindaje: nunca perder ceros a la izquierda
                 
-        subp_sel_label = st.selectbox("Subpartida Específica", list(dict_subs.keys()), key="nac_subp")
+        subp_sel_label = st.selectbox("Subpartida", list(dict_subs.keys()), key="nac_subp")
         subp_sel_code = dict_subs[subp_sel_label]
 
     subp_cond = "1=1"
@@ -645,7 +645,7 @@ if selected_state_code == 'US':
         # ==========================================
         if subp_sel_code == "TOTAL":
             target_state_query = clicked_state if clicked_state else '-'
-            nombre_estado_click = US_STATES.get(clicked_state, clicked_state) if clicked_state else "Nacional (Estados Unidos)"
+            nombre_estado_click = US_STATES.get(clicked_state, clicked_state) if clicked_state else "Nacional"
             
             st.markdown(f"<h3 style='margin-top: 30px; color: #0F172A; text-align: center;'>Top 3 Subpartidas: {nombre_estado_click}</h3>", unsafe_allow_html=True)
             
@@ -658,17 +658,17 @@ if selected_state_code == 'US':
                     return "<div style='padding:15px; color:#64748B; font-style:italic;'>No hay operaciones para esta selección.</div>"
                 html = f"""
                 <div style="background-color: white; border-radius: 10px; border: 1px solid #E2E8F0; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.02);">
-                    <table style="width: 100%; border-collapse: collapse; font-family: sans-serif; text-align: left;">
+                    <table style="width: 100%; border-collapse: collapse; font-family: sans-serif; text-align: left; margin: 0; border: none !important;">
                         <thead>
-                            <tr style="background-color: #F8FAFC; border-bottom: 2px solid #E2E8F0; color: #475569; font-size: 0.85rem; text-transform: uppercase;">
-                                <th style="padding: 12px 15px; font-weight: 700; width: 55%;">Subpartida</th>
-                                <th style="padding: 12px 15px; font-weight: 700; text-align: right; width: 25%;">Total (USD)</th>
-                                <th style="padding: 12px 15px; font-weight: 700; text-align: center; width: 20%;">{label_part_tbl}</th>
+                            <tr style="background-color: #F8FAFC;">
+                                <th style="padding: 12px 15px; font-weight: 700; width: 55%; color: #475569; font-size: 0.85rem; text-transform: uppercase; border: none !important; border-bottom: 2px solid #E2E8F0 !important;">Subpartida</th>
+                                <th style="padding: 12px 15px; font-weight: 700; text-align: right; width: 25%; color: #475569; font-size: 0.85rem; text-transform: uppercase; border: none !important; border-bottom: 2px solid #E2E8F0 !important;">Total (USD)</th>
+                                <th style="padding: 12px 15px; font-weight: 700; text-align: center; width: 20%; color: #475569; font-size: 0.85rem; text-transform: uppercase; border: none !important; border-bottom: 2px solid #E2E8F0 !important;">{label_part_tbl}</th>
                             </tr>
                         </thead>
                         <tbody>
                 """
-                for _, row in df.iterrows():
+                for idx, (_, row) in enumerate(df.iterrows()):
                     subp = str(row['COM_DESC'])
                     val_main = row['Val_Main']
                     val_ref = row['Val_Ref']
@@ -677,13 +677,16 @@ if selected_state_code == 'US':
                         part_val = (val_ref / val_main * 100) if val_main > 0 else 0
                     else:
                         part_val = (val_main / val_ref * 100) if val_ref > 0 else 0
-                        
+                    
+                    # Forzamos !important para anular el CSS nativo de Streamlit
+                    b_bottom = "border-bottom: none !important;" if idx == len(df) - 1 else "border-bottom: 1px solid #F1F5F9 !important;"
+                    
                     html += f"""
-                        <tr style="border-bottom: 1px solid #F1F5F9; transition: background-color 0.2s;">
-                            <td style="padding: 12px 15px; color: #0F172A; font-size: 0.85rem; font-weight: 600;">{subp}</td>
-                            <td style="padding: 12px 15px; color: #0F172A; font-size: 0.9rem; font-weight: 800; text-align: right;">${val_main:,.0f}</td>
-                            <td style="padding: 12px 15px; text-align: center;">
-                                <span style="background-color: #F1F5F9; color: {color_tema}; padding: 4px 8px; border-radius: 6px; font-weight: 800; font-size: 0.85rem; border: 1px solid #E2E8F0;">
+                        <tr style="transition: background-color 0.2s;">
+                            <td style="padding: 12px 15px; color: #0F172A; font-size: 0.85rem; font-weight: 600; border: none !important; {b_bottom}">{subp}</td>
+                            <td style="padding: 12px 15px; color: #0F172A; font-size: 0.9rem; font-weight: 800; text-align: right; border: none !important; {b_bottom}">${val_main:,.0f}</td>
+                            <td style="padding: 12px 15px; text-align: center; border: none !important; {b_bottom}">
+                                <span style="color: {color_tema}; font-weight: 800; font-size: 0.9rem;">
                                     {part_val:.1f}%
                                 </span>
                             </td>
@@ -739,13 +742,13 @@ if selected_state_code == 'US':
             col_imp, col_exp = st.columns(2)
             
             with col_imp:
-                titulo_imp = "Importaciones (El Estado Importa)" if clicked_state else "Importaciones (A Nivel Nacional)"
+                titulo_imp = "Importaciones" if clicked_state else "Importaciones"
                 st.markdown(f"<h4 style='color: #2596be;'>{titulo_imp}</h4>", unsafe_allow_html=True)
                 df_ti = conn.query(get_query_top3('imports')).to_df()
                 st.markdown(generar_tabla_html(df_ti, "#2596be"), unsafe_allow_html=True)
 
             with col_exp:
-                titulo_exp = "Exportaciones (El Estado Exporta)" if clicked_state else "Exportaciones (A Nivel Nacional)"
+                titulo_exp = "Exportaciones" if clicked_state else "Exportaciones"
                 st.markdown(f"<h4 style='color: #008889;'>{titulo_exp}</h4>", unsafe_allow_html=True)
                 df_te = conn.query(get_query_top3('exports')).to_df()
                 st.markdown(generar_tabla_html(df_te, "#008889"), unsafe_allow_html=True)
@@ -785,7 +788,10 @@ if selected_state_code == 'US':
                 
         opciones_especiales_n = ["Total de la Sección", "Top 5 Subpartidas", "Top 10 Subpartidas"]
 
-        sel_previa_n = list(st.session_state.get("nac_h_multi", ["Top 5 Subpartidas"]))
+        if "nac_h_multi" not in st.session_state:
+            st.session_state["nac_h_multi"] = ["Top 5 Subpartidas"]
+
+        sel_previa_n = list(st.session_state["nac_h_multi"])
         n_lim_previo_n = 10 if "Top 10 Subpartidas" in sel_previa_n else (5 if "Top 5 Subpartidas" in sel_previa_n else 0)
 
         codigos_top_previos_n = set()
@@ -800,21 +806,19 @@ if selected_state_code == 'US':
         # Comparamos por LONGITUD en lugar de identidad (List vs Tuple) para evitar el loop infinito de recargas
         sel_previa_n_limpia = [s for s in sel_previa_n if s in opciones_todas_n]
         
-        if len(sel_previa_n_limpia) != len(sel_previa_n):
-            st.session_state["nac_h_multi"] = sel_previa_n_limpia
+        st.session_state["nac_h_multi"] = sel_previa_n_limpia
 
         with col_nh3:
             subp_sel_n = st.multiselect(
-                "Selecciona las Subpartidas a graficar",
+                "Subpartidas a graficar",
                 options=opciones_todas_n,
-                default=["Top 5 Subpartidas"],
                 key="nac_h_multi",
                 on_change=_alternar_top_exclusivo,
                 args=("nac_h_multi",)
             )
 
         # 3. Checkbox para el desglose mensual (lo dejamos abajo para que el texto no se amontone en columnas estrechas)
-        desglosar_mes_n = st.checkbox("Mostrar desglose mensual (Línea de tiempo)", value=False, key="nac_h_desglose")
+        desglosar_mes_n = st.checkbox("Mostrar desglose mensual", value=False, key="nac_h_desglose")
 
         st.markdown("<div style='margin-bottom: 10px;'></div>", unsafe_allow_html=True)
 
@@ -1181,10 +1185,10 @@ else:
     </div>
     </div>
     <div style="flex: 0 0 12%; display: flex; flex-direction: column; justify-content: center; gap: 8px; align-items: center;">
-    <div style="background-color: #F1F5F9; border:1px solid #E2E8F0; border-radius: 6px; width: 100%; font-weight: 700; font-size: 0.75rem; color: #64748B; text-align: center; height: 22px; display: flex; align-items: center; justify-content: center;">
+    <div style="width: 100%; font-weight: 700; font-size: 0.8rem; color: #64748B; text-align: center;">
     {r['Part_Mex_Prev']:.1f}%
     </div>
-    <div style="background-color: #F8FAFC; border:1px solid #E2E8F0; border-radius: 6px; width: 100%; font-weight: 800; font-size: 0.85rem; color: {color_mex}; text-align: center; height: 26px; display: flex; align-items: center; justify-content: center;">
+    <div style="width: 100%; font-weight: 800; font-size: 0.95rem; color: {color_mex}; text-align: center;">
     {r['Part_Mex']:.1f}%
     </div>
     </div>
@@ -1282,10 +1286,10 @@ else:
     </div>
     </div>
     <div style="flex: 0 0 12%; display: flex; flex-direction: column; justify-content: center; gap: 8px; align-items: center;">
-    <div style="background-color: #F1F5F9; border:1px solid #E2E8F0; border-radius: 6px; width: 100%; font-weight: 700; font-size: 0.75rem; color: #64748B; text-align: center; height: 22px; display: flex; align-items: center; justify-content: center;">
+    <div style="width: 100%; font-weight: 700; font-size: 0.8rem; color: #64748B; text-align: center;">
     {r['Part_Mex_Prev']:.1f}%
     </div>
-    <div style="background-color: #F8FAFC; border:1px solid #E2E8F0; border-radius: 6px; width: 100%; font-weight: 800; font-size: 0.85rem; color: {color_mex}; text-align: center; height: 26px; display: flex; align-items: center; justify-content: center;">
+    <div style="width: 100%; font-weight: 800; font-size: 0.95rem; color: {color_mex}; text-align: center;">
     {r['Part_Mex']:.1f}%
     </div>
     </div>
@@ -1401,7 +1405,10 @@ else:
     # Pre-cálculo dinámico: qué Top (5/10) está activo ahora mismo, para (a) excluir
     # esas subpartidas del resto de la lista (evita seleccionarlas 2 veces) y
     # (b) reutilizar el mismo resultado más abajo sin volver a consultar.
-    sel_previa = list(st.session_state.get("est_multi", ["Top 5 Subpartidas"]))
+    if "est_multi" not in st.session_state:
+        st.session_state["est_multi"] = ["Top 5 Subpartidas"]
+
+    sel_previa = list(st.session_state["est_multi"])
     n_lim_previo = 10 if "Top 10 Subpartidas" in sel_previa else (5 if "Top 5 Subpartidas" in sel_previa else 0)
 
     codigos_top_previos = set()
@@ -1417,13 +1424,11 @@ else:
     # Comparamos por LONGITUD para evitar el loop infinito de recargas
     sel_previa_limpia = [s for s in sel_previa if s in opciones_todas]
     
-    if len(sel_previa_limpia) != len(sel_previa):
-        st.session_state["est_multi"] = sel_previa_limpia
+    st.session_state["est_multi"] = sel_previa_limpia
     
     subp_seleccionadas = st.multiselect(
-        "Selecciona las Subpartidas a graficar", 
+        "Subpartidas a graficar", 
         options=opciones_todas, 
-        default=["Top 5 Subpartidas"], 
         key="est_multi",
         on_change=_alternar_top_exclusivo,
         args=("est_multi",)
@@ -1624,7 +1629,7 @@ else:
     st.markdown(f"<h4 style='color:#0F172A; margin-top:15px;'>1. Top 5 Subpartidas Importadas por {selected_state_name} y Participación de México</h4>", unsafe_allow_html=True)
     st.markdown(get_top_5_total_split('imports', color_mex="#2596be", color_rest="#CBD5E1"), unsafe_allow_html=True)
     
-    st.markdown(f"<h4 style='color:#0F172A; margin-top:30px;'>2. Top 5 Subpartidas Provenientes de México</h4>", unsafe_allow_html=True)
+    st.markdown(f"<h4 style='color:#0F172A; margin-top:30px;'>2. Top 5 Subpartidas Importadas desde México</h4>", unsafe_allow_html=True)
     st.markdown(get_top_5_mexico_base('imports', color_mex="#2596be"), unsafe_allow_html=True)
     
     st.markdown("<hr style='border-color: #008889; border-width: 2px; margin-top:40px; margin-bottom:0px;'>", unsafe_allow_html=True)
@@ -1635,7 +1640,7 @@ else:
     st.markdown(f"<h4 style='color:#0F172A; margin-top:15px;'>3. Top 5 Subpartidas Exportadas por {selected_state_name} y Participación a México</h4>", unsafe_allow_html=True)
     st.markdown(get_top_5_total_split('exports', color_mex="#008889", color_rest="#CBD5E1"), unsafe_allow_html=True)
     
-    st.markdown(f"<h4 style='color:#0F172A; margin-top:30px;'>4. Top 5 Subpartidas Destinadas a México</h4>", unsafe_allow_html=True)
+    st.markdown(f"<h4 style='color:#0F172A; margin-top:30px;'>4. Top 5 Subpartidas Exportadas a México</h4>", unsafe_allow_html=True)
     st.markdown(get_top_5_mexico_base('exports', color_mex="#008889"), unsafe_allow_html=True)
     
     del df_mex_ytd
